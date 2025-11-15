@@ -6,11 +6,13 @@ Main screen showing phase progress, metrics, and overall experiment status.
 
 from typing import Optional, Dict, Any
 from queue import Queue, Empty
+import time
 
 from textual.app import ComposeResult
 from textual.screen import Screen
 from textual.widgets import Header, Footer, Static
 from textual.containers import Container, Vertical
+from textual.geometry import Size
 
 from ..widgets.progress_bar import PhaseProgressBar
 from ..widgets.phase_list import PhaseList
@@ -34,6 +36,9 @@ class ProgressScreen(Screen):
         ("f2", "switch_screen('metadata')", "Metadata"),
         ("f3", "switch_screen('config')", "Config"),
         ("f4", "switch_screen('history')", "History"),
+        ("p", "pause_experiment", "Pause"),
+        ("r", "resume_experiment", "Resume"),
+        ("c", "cancel_experiment", "Cancel"),
         ("q", "quit", "Quit"),
     ]
 
@@ -111,9 +116,49 @@ class ProgressScreen(Screen):
         """Initialize screen on mount."""
         self.sub_title = "Experiment Progress Monitor"
 
+        # Initialize debouncing state
+        self._last_update_time = 0
+        self._update_debounce_ms = 200  # Debounce updates to 200ms
+        self._pending_updates = {}
+
         # Start polling loop if event queue is provided
         if self.event_queue:
             self._polling_interval = self.set_interval(0.1, self._poll_events)
+
+    def _should_update(self) -> bool:
+        """Check if enough time has passed to allow an update."""
+        current_time = time.time() * 1000  # Convert to milliseconds
+        return (current_time - self._last_update_time) >= self._update_debounce_ms
+
+    def _mark_update(self) -> None:
+        """Mark that an update just occurred."""
+        self._last_update_time = time.time() * 1000
+
+    def _flush_pending_updates(self) -> None:
+        """Flush all pending updates immediately."""
+        if not self._pending_updates:
+            return
+            
+        # Apply the most recent update for each type
+        if 'phase_progress' in self._pending_updates:
+            update = self._pending_updates['phase_progress']
+            if self.progress_bar:
+                self.progress_bar.update_phase_name(update['phase_name'])
+                self.progress_bar.update_progress(update['items_done'], update['items_total'])
+                
+        if 'phase_status' in self._pending_updates:
+            update = self._pending_updates['phase_status']
+            if self.phase_list:
+                self.phase_list.update_phase_status(update['phase_num'], update['status'])
+                
+        if 'metrics' in self._pending_updates:
+            update = self._pending_updates['metrics']
+            if self.metrics:
+                self.metrics.update_metrics(**update)
+        
+        # Clear pending updates and mark time
+        self._pending_updates.clear()
+        self._mark_update()
 
     def update_phase_progress(
         self,
@@ -123,7 +168,7 @@ class ProgressScreen(Screen):
         items_total: int
     ) -> None:
         """
-        Update current phase progress.
+        Update current phase progress with debouncing.
 
         Args:
             phase_num: Phase number (1-10)
@@ -131,20 +176,34 @@ class ProgressScreen(Screen):
             items_done: Items completed
             items_total: Total items
         """
-        if self.progress_bar:
-            self.progress_bar.update_phase_name(phase_name)
-            self.progress_bar.update_progress(items_done, items_total)
+        # Store the update
+        self._pending_updates['phase_progress'] = {
+            'phase_name': phase_name,
+            'items_done': items_done,
+            'items_total': items_total
+        }
+        
+        # Apply immediately if enough time has passed
+        if self._should_update():
+            self._flush_pending_updates()
 
     def update_phase_status(self, phase_num: int, status: str) -> None:
         """
-        Update phase status in the list.
+        Update phase status in list with debouncing.
 
         Args:
             phase_num: Phase number (1-10)
-            status: Status (pending, in_progress, completed, failed, skipped)
+            status: New status
         """
-        if self.phase_list:
-            self.phase_list.update_phase_status(phase_num, status)
+        # Store the update
+        self._pending_updates['phase_status'] = {
+            'phase_num': phase_num,
+            'status': status
+        }
+        
+        # Apply immediately if enough time has passed
+        if self._should_update():
+            self._flush_pending_updates()
 
     def update_metrics(
         self,
@@ -153,19 +212,23 @@ class ProgressScreen(Screen):
         items_per_second: Optional[float] = None
     ) -> None:
         """
-        Update real-time metrics.
+        Update real-time metrics with debouncing.
 
         Args:
             elapsed_seconds: Time elapsed since experiment start
             estimated_remaining_seconds: Estimated time remaining
             items_per_second: Processing rate
         """
-        if self.metrics:
-            self.metrics.update_metrics(
-                elapsed_seconds,
-                estimated_remaining_seconds,
-                items_per_second
-            )
+        # Store the update
+        self._pending_updates['metrics'] = {
+            'elapsed_seconds': elapsed_seconds,
+            'estimated_remaining_seconds': estimated_remaining_seconds,
+            'items_per_second': items_per_second
+        }
+        
+        # Apply immediately if enough time has passed
+        if self._should_update():
+            self._flush_pending_updates()
 
     def start_experiment_tracking(self) -> None:
         """Start tracking experiment time."""
@@ -290,19 +353,54 @@ class ProgressScreen(Screen):
 
     def _handle_experiment_error(self, event: Dict[str, Any]) -> None:
         """Handle experiment error event."""
-        session_id = event.get("session_id", "unknown")
-        error_type = event.get("error_type", "Unknown")
-        error_message = event.get("error_message", "No details available")
-        failed_phase = event.get("failed_phase", 0)
+        if self.phase_list:
+            self.phase_list.update_phase_status(
+                event.get("phase_num", 1), 
+                "error"
+            )
 
-        # Show error notification
-        self.notify(
-            f"Experiment Failed ✗\n"
-            f"Session: {session_id}\n"
-            f"Failed at Phase {failed_phase}\n"
-            f"Error: {error_type}\n"
-            f"{error_message[:100]}...",
-            title="Error",
-            severity="error",
-            timeout=15
-        )
+    def action_pause_experiment(self) -> None:
+        """Pause the current experiment."""
+        # Get the main app and call its pause method
+        app = self.app
+        if hasattr(app, 'action_pause_experiment'):
+            app.action_pause_experiment()
+
+    def action_resume_experiment(self) -> None:
+        """Resume the current experiment."""
+        # Get the main app and call its resume method
+        app = self.app
+        if hasattr(app, 'action_resume_experiment'):
+            app.action_resume_experiment()
+
+    def action_cancel_experiment(self) -> None:
+        """Cancel the current experiment."""
+        # Get the main app and call its cancel method
+        app = self.app
+        if hasattr(app, 'action_cancel_experiment'):
+            app.action_cancel_experiment()
+
+    def handle_resize(self, size: Size) -> None:
+        """Handle terminal resize events."""
+        # Flush any pending updates before resize
+        self._flush_pending_updates()
+        
+        # Adjust layout based on new size
+        if size.width < 80:
+            # Compact layout for small terminals
+            try:
+                self.query_one("#phase-list-container").styles.height = "1fr"
+                self.query_one("#metrics-container").styles.height = "1fr"
+            except:
+                pass  # Ignore if widgets not found
+        else:
+            # Full layout for normal terminals
+            try:
+                self.query_one("#phase-list-container").styles.height = None
+                self.query_one("#metrics-container").styles.height = None
+            except:
+                pass  # Ignore if widgets not found
+        
+        # Refresh metrics display
+        if hasattr(self, 'metrics'):
+            self.metrics.refresh()

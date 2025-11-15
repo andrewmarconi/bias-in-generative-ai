@@ -8,6 +8,8 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
 import sys
+import threading
+import time
 
 from .utils.config import load_config, validate_config
 from .generation.image_generator import ImageGenerator
@@ -69,6 +71,12 @@ class BiasDetectionExperiment:
 
         # Session ID for tracking (set when experiment starts)
         self.session_id: Optional[str] = None
+        
+        # Pause/resume state
+        self.is_paused: bool = False
+        self.should_stop: bool = False
+        self.pause_event = None
+        self.stop_event = None
 
     def setup(self):
         """Initialize all experiment components."""
@@ -93,6 +101,38 @@ class BiasDetectionExperiment:
         self.tracker = MLflowTracker(self.config)
 
         logger.info("\nSetup complete!")
+        
+        # Initialize pause/stop events
+        self.pause_event = threading.Event()
+        self.stop_event = threading.Event()
+
+    def pause(self) -> None:
+        """Pause the experiment."""
+        logger.info(f"Pausing experiment {self.session_id}")
+        self.is_paused = True
+        self.pause_event.set()
+
+    def resume(self) -> None:
+        """Resume the experiment."""
+        logger.info(f"Resuming experiment {self.session_id}")
+        self.is_paused = False
+        self.pause_event.clear()
+
+    def cancel(self, reason: str = "User cancelled") -> None:
+        """Cancel the experiment."""
+        logger.info(f"Cancelling experiment {self.session_id}: {reason}")
+        self.should_stop = True
+        self.stop_event.set()
+
+    def _check_pause_stop(self) -> None:
+        """Check for pause/stop signals and wait appropriately."""
+        if self.should_stop:
+            raise InterruptedError("Experiment cancelled by user")
+        
+        if self.is_paused:
+            logger.info("Experiment paused, waiting for resume...")
+            self.pause_event.wait()
+            logger.info("Experiment resumed")
 
     def run_phase_1_design(self):
         """
@@ -271,7 +311,15 @@ class BiasDetectionExperiment:
             self.session_id = session_id
         elif not self.session_id:
             self.session_id = f"exp_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-
+        
+        # Reset pause/stop state
+        self.is_paused = False
+        self.should_stop = False
+        if self.pause_event:
+            self.pause_event.clear()
+        if self.stop_event:
+            self.stop_event.clear()
+        
         experiment_start = time.time()
         current_phase = 0
 
@@ -294,7 +342,11 @@ class BiasDetectionExperiment:
             phase_start = time.time()
             if self.callback:
                 self.callback.on_phase_start(1, "Experimental Design", 1)
+            
+            self._check_pause_stop()
             self.run_phase_1_design()
+            self._check_pause_stop()
+            
             if self.callback:
                 self.callback.on_phase_complete(1, 1, time.time() - phase_start)
 
@@ -304,7 +356,11 @@ class BiasDetectionExperiment:
             total_prompts = sum(len(p) for p in self.config['prompts'].values())
             if self.callback:
                 self.callback.on_phase_start(2, "Prompt Engineering", total_prompts)
+            
+            self._check_pause_stop()
             self.run_phase_2_prompts()
+            self._check_pause_stop()
+            
             if self.callback:
                 self.callback.on_phase_complete(2, total_prompts, time.time() - phase_start)
 
@@ -315,7 +371,11 @@ class BiasDetectionExperiment:
                           self.config['generation']['num_images_per_prompt']
             if self.callback:
                 self.callback.on_phase_start(3, "Image Generation", total_images)
+            
+            self._check_pause_stop()
             self.run_phase_3_generation()
+            self._check_pause_stop()
+            
             if self.callback:
                 self.callback.on_phase_complete(3, total_images, time.time() - phase_start)
 
@@ -324,7 +384,11 @@ class BiasDetectionExperiment:
             phase_start = time.time()
             if self.callback:
                 self.callback.on_phase_start(4, "VQA Analysis", total_images)
+            
+            self._check_pause_stop()
             self.run_phase_4_analysis()
+            self._check_pause_stop()
+            
             if self.callback:
                 self.callback.on_phase_complete(4, total_images, time.time() - phase_start)
 

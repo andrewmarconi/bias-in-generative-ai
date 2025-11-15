@@ -17,6 +17,9 @@ import tempfile
 import socket
 import sys
 import platform
+import logging
+
+log = logging.getLogger(__name__)
 
 try:
     import fcntl
@@ -366,6 +369,78 @@ class StateManager:
                 data = json.load(f)
                 if data.get("session_id") == session_id:
                     self.active_link_path.unlink()
+
+    def pause_session(self, session_id: str) -> None:
+        """
+        Pause an experiment session.
+
+        Args:
+            session_id: Session to pause
+
+        Raises:
+            ValueError: If session is not in running state
+        """
+        session = self.get_session(session_id)
+        
+        if session.status != SessionStatus.RUNNING:
+            raise ValueError(f"Cannot pause session {session_id}: not running (current status: {session.status.value})")
+        
+        # Update session status to paused
+        self.update_session_status(session_id=session_id, new_status="paused")
+        
+        log.info(f"Paused experiment session: {session_id}")
+
+    def resume_session(self, session_id: str) -> None:
+        """
+        Resume a paused experiment session.
+
+        Args:
+            session_id: Session to resume
+
+        Raises:
+            ValueError: If session is not in paused state
+        """
+        session = self.get_session(session_id)
+        
+        if session.status != SessionStatus.PAUSED:
+            raise ValueError(f"Cannot resume session {session_id}: not paused (current status: {session.status.value})")
+        
+        # Update session status back to running
+        self.update_session_status(session_id=session_id, new_status="running")
+        
+        log.info(f"Resumed experiment session: {session_id}")
+
+    def cancel_session(self, session_id: str, reason: Optional[str] = None) -> None:
+        """
+        Cancel an experiment session.
+
+        Args:
+            session_id: Session to cancel
+            reason: Optional reason for cancellation
+
+        Raises:
+            ValueError: If session is already completed
+        """
+        session = self.get_session(session_id)
+        
+        if session.status in (SessionStatus.COMPLETED, SessionStatus.FAILED, SessionStatus.CANCELLED):
+            raise ValueError(f"Cannot cancel session {session_id}: already terminal (status: {session.status.value})")
+        
+        # Create error info for cancellation
+        error_info = ErrorInfo(
+            type="Cancellation",
+            message=reason or "User cancelled experiment",
+            timestamp=datetime.now().isoformat()
+        )
+        
+        # Update session status to cancelled
+        self.update_session_status(
+            session_id=session_id, 
+            new_status="cancelled",
+            error=error_info
+        )
+        
+        log.info(f"Cancelled experiment session: {session_id}, reason: {reason}")
 
     def update_session_status(
         self,

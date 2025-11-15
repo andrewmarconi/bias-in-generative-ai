@@ -18,6 +18,7 @@ from textual.widgets import (
 )
 from textual.reactive import reactive
 from textual.binding import Binding
+from textual.geometry import Size
 
 from ..state.manager import StateManager
 
@@ -400,3 +401,22 @@ class MetadataScreen(Screen):
         except Exception:
             # Ignore file watching errors to avoid disrupting UI
             pass
+
+    def handle_resize(self, size: Size) -> None:
+        """Handle terminal resize events."""
+        # Adjust tab layout based on terminal size
+        if size.width < 80:
+            # Compact layout for small terminals
+            try:
+                self.query_one(Tabs).styles.width = "100%"
+            except:
+                pass
+        else:
+            # Normal layout
+            try:
+                self.query_one(Tabs).styles.width = None
+            except:
+                pass
+        
+        # Refresh content
+        self.refresh_config()

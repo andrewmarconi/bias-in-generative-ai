@@ -18,6 +18,7 @@ from textual.widgets import (
 from textual.message import Message
 from textual.binding import Binding
 from textual import log
+from textual.geometry import Size
 
 from ..state.manager import StateManager
 from ..state.config import ConfigurationState, ValidationStatus
@@ -729,3 +730,24 @@ Locking:
         
         # Could show a modal dialog with help text
         log.info(help_text)
+
+    def handle_resize(self, size: Size) -> None:
+        """Handle terminal resize events."""
+        # Adjust layout based on new size
+        if size.width < 100:
+            # Compact layout for small terminals
+            try:
+                self.query_one(TextArea).styles.height = "10"
+                self.query_one(TabbedContent).styles.height = "15"
+            except:
+                pass
+        else:
+            # Full layout for normal terminals
+            try:
+                self.query_one(TextArea).styles.height = None
+                self.query_one(TabbedContent).styles.height = None
+            except:
+                pass
+        
+        # Refresh validation status
+        self._update_validation_status()

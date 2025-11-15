@@ -14,16 +14,21 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Header, Footer
 
+from .utils.structured_logger import get_logger
+
 from .screens.progress import ProgressScreen
 from .screens.metadata import MetadataScreen
 from .screens.config_editor import ConfigEditorScreen
+from .screens.history import HistoryScreen
+from .screens.help import HelpScreen
+from .widgets.error_panel import ErrorPanel
 from .state.manager import StateManager
 from .state.callbacks import QueueProgressCallback
 from .state.session import ExperimentSession
 from ..experiment import BiasDetectionExperiment
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger("bias_detector.tui.app")
 
 
 class TUIApp(App):
@@ -67,7 +72,11 @@ class TUIApp(App):
         Binding("f2", "switch_screen('metadata')", "Metadata", show=True),
         Binding("f3", "switch_screen('config')", "Config", show=True),
         Binding("f4", "switch_screen('history')", "History", show=True),
+        Binding("h", "show_help", "Help", show=True),
         Binding("ctrl+n", "launch_experiment", "New Experiment", show=True),
+        Binding("p", "pause_experiment", "Pause", show=True),
+        Binding("r", "resume_experiment", "Resume", show=True),
+        Binding("c", "cancel_experiment", "Cancel", show=True),
         Binding("q", "quit", "Quit", show=True),
     ]
 
@@ -110,6 +119,8 @@ class TUIApp(App):
         # Screens
         self.progress_screen: Optional[ProgressScreen] = None
         self.metadata_screen: Optional[MetadataScreen] = None
+        self.history_screen: Optional[HistoryScreen] = None
+        self.help_screen: Optional[HelpScreen] = None
 
     def on_mount(self) -> None:
         """Initialize application on mount."""
@@ -131,8 +142,18 @@ class TUIApp(App):
         )
         self.install_screen(self.config_screen, name="config")
 
-        # Placeholder screens (will be implemented in later phases)
-        # self.install_screen(HistoryScreen(), name="history")
+        # History screen
+        self.history_screen = HistoryScreen(
+            state_manager=self.state_manager
+        )
+        self.install_screen(self.history_screen, name="history")
+
+        # Help screen
+        self.help_screen = HelpScreen()
+        self.install_screen(self.help_screen, name="help")
+
+        # Error panel (not installed as persistent screen, used as modal)
+        self.error_panel: Optional[ErrorPanel] = None
 
         # Show progress screen by default
         self.push_screen("progress")
@@ -327,12 +348,133 @@ class TUIApp(App):
 
     def action_launch_experiment(self) -> None:
         """Launch a new experiment (Ctrl+N)."""
+        logger.user_action("launch_experiment", component="tui_app")
+        
         try:
-            session_id = self.start_experiment()
-            logger.info(f"Launched experiment: {session_id}")
+            # Check if experiment is already active
+            active_session = self.state_manager.get_active_session()
+            if active_session and active_session.status.value in ("pending", "running", "paused"):
+                logger.error("Cannot start new experiment: another experiment is already active", component="tui_app")
+                # Could show error dialog here
+                return
+                
+            with logger.start_timer("experiment_launch"):
+                session_id = self.start_experiment()
+            logger.info(f"Launched experiment: {session_id}", component="tui_app")
+            logger.experiment_event("started", session_id, component="tui_app")
         except RuntimeError as e:
-            logger.error(f"Failed to launch experiment: {e}")
+            logger.error(f"Failed to launch experiment: {e}", component="tui_app", error=e)
             # Could show error dialog here
+
+    def action_pause_experiment(self) -> None:
+        """Pause the current experiment."""
+        if not self.current_session:
+            logger.warning("No active experiment to pause")
+            return
+            
+        if self.current_session.status.value != "running":
+            logger.warning(f"Cannot pause experiment: not running (status: {self.current_session.status.value})")
+            return
+            
+        try:
+            # Pause through state manager
+            self.state_manager.pause_session(self.current_session.session_id)
+            
+            # Pause the experiment instance
+            if self.current_experiment:
+                self.current_experiment.pause()
+                
+            logger.info(f"Paused experiment: {self.current_session.session_id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to pause experiment: {e}")
+
+    def action_resume_experiment(self) -> None:
+        """Resume the current experiment."""
+        if not self.current_session:
+            logger.warning("No active experiment to resume")
+            return
+            
+        if self.current_session.status.value != "paused":
+            logger.warning(f"Cannot resume experiment: not paused (status: {self.current_session.status.value})")
+            return
+            
+        try:
+            # Resume through state manager
+            self.state_manager.resume_session(self.current_session.session_id)
+            
+            # Resume the experiment instance
+            if self.current_experiment:
+                self.current_experiment.resume()
+                
+            logger.info(f"Resumed experiment: {self.current_session.session_id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to resume experiment: {e}")
+
+    def action_cancel_experiment(self) -> None:
+        """Cancel the current experiment with confirmation."""
+        if not self.current_session:
+            logger.warning("No active experiment to cancel")
+            return
+            
+        if self.current_session.status.value in ("completed", "failed", "cancelled"):
+            logger.warning(f"Cannot cancel experiment: already terminal (status: {self.current_session.status.value})")
+            return
+            
+        # For now, just cancel without confirmation dialog
+        # TODO: Add confirmation dialog in future polish phase
+        try:
+            # Cancel through state manager
+            self.state_manager.cancel_session(self.current_session.session_id, "User cancelled from TUI")
+            
+            # Cancel the experiment instance
+            if self.current_experiment:
+                self.current_experiment.cancel("User cancelled from TUI")
+                
+            logger.info(f"Cancelled experiment: {self.current_session.session_id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to cancel experiment: {e}")
+
+    def action_show_help(self) -> None:
+        """Show the help overlay screen."""
+        try:
+            self.push_screen("help")
+        except Exception as e:
+            logger.error(f"Failed to show help screen: {e}")
+
+    def action_show_errors(self) -> None:
+        """Show the error panel."""
+        try:
+            if not self.error_panel:
+                self.error_panel = ErrorPanel()
+            self.push_screen(self.error_panel)
+        except Exception as e:
+            logger.error(f"Failed to show error panel: {e}")
+
+    def show_error(self, message: str, source: str = "Unknown", level: str = "ERROR", traceback: Optional[str] = None) -> None:
+        """
+        Show an error in the error panel.
+        
+        Args:
+            message: Error message
+            source: Error source/location
+            level: Error level (ERROR, WARNING, INFO)
+            traceback: Optional traceback information
+        """
+        try:
+            if not self.error_panel:
+                self.error_panel = ErrorPanel()
+            
+            self.error_panel.add_error(message, source, level, traceback)
+            
+            # Show error panel if not already visible
+            if not isinstance(self.screen, ErrorPanel):
+                self.push_screen(self.error_panel)
+                
+        except Exception as e:
+            logger.error(f"Failed to show error: {e}")
 
     async def action_quit(self) -> None:
         """Quit the application with cleanup."""
@@ -344,3 +486,12 @@ class TUIApp(App):
         # Shutdown executor gracefully
         self.executor.shutdown(wait=True, cancel_futures=False)
         logger.info("TUI application shutdown complete")
+
+    def on_resize(self, event) -> None:
+        """Handle terminal resize events."""
+        logger.debug(f"Terminal resized to {event.size.width}x{event.size.height}")
+        
+        # Propagate resize to current screen
+        current_screen = self.screen
+        if hasattr(current_screen, 'handle_resize'):
+            current_screen.handle_resize(event.size)

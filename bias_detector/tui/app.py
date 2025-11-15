@@ -16,6 +16,7 @@ from textual.widgets import Header, Footer
 
 from .screens.progress import ProgressScreen
 from .screens.metadata import MetadataScreen
+from .screens.config_editor import ConfigEditorScreen
 from .state.manager import StateManager
 from .state.callbacks import QueueProgressCallback
 from .state.session import ExperimentSession
@@ -122,9 +123,15 @@ class TUIApp(App):
             state_manager=self.state_manager
         )
         self.install_screen(self.metadata_screen, name="metadata")
+        
+        # Configuration editor screen
+        self.config_screen = ConfigEditorScreen(
+            config_path=str(self.config_path),
+            state_manager=self.state_manager
+        )
+        self.install_screen(self.config_screen, name="config")
 
         # Placeholder screens (will be implemented in later phases)
-        # self.install_screen(ConfigScreen(), name="config")
         # self.install_screen(HistoryScreen(), name="history")
 
         # Show progress screen by default

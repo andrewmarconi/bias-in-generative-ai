@@ -9,14 +9,11 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 import sys
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from bias_detector.utils.config import load_config, validate_config
-from bias_detector.generation.image_generator import ImageGenerator
-from bias_detector.analysis.vqa_analyzer import VQAAnalyzer
-from bias_detector.statistics.bias_metrics import BiasMetrics
-from bias_detector.utils.mlflow_tracker import MLflowTracker
+from .utils.config import load_config, validate_config
+from .generation.image_generator import ImageGenerator
+from .analysis.vqa_analyzer import VQAAnalyzer
+from .statistics.bias_metrics import BiasMetrics
+from .utils.mlflow_tracker import MLflowTracker
 
 # Set up logging
 logging.basicConfig(
@@ -33,12 +30,17 @@ class BiasDetectionExperiment:
     Implements the complete research framework from Phase 1 through Phase 10.
     """
 
-    def __init__(self, config_path: str = "config/experiment_config.yaml"):
+    def __init__(
+        self,
+        config_path: str = "config/experiment_config.yaml",
+        callback: Optional[Any] = None
+    ):
         """
         Initialize experiment.
 
         Args:
             config_path: Path to experiment configuration file
+            callback: Optional progress callback implementing ProgressCallback protocol
         """
         logger.info("=" * 80)
         logger.info("Bias Detection Framework for Generative AI Image Models")
@@ -51,6 +53,9 @@ class BiasDetectionExperiment:
         logger.info(f"Experiment: {self.config['experiment']['name']}")
         logger.info(f"Description: {self.config['experiment']['description']}")
 
+        # Store progress callback
+        self.callback = callback
+
         # Initialize components
         self.generator = None
         self.analyzer = None
@@ -61,6 +66,9 @@ class BiasDetectionExperiment:
         self.generation_results = {}
         self.analysis_results = []
         self.statistical_summary = {}
+
+        # Session ID for tracking (set when experiment starts)
+        self.session_id: Optional[str] = None
 
     def setup(self):
         """Initialize all experiment components."""
@@ -247,34 +255,137 @@ class BiasDetectionExperiment:
         logger.info("Counterfactual analysis not yet implemented in this run.")
         # TODO: Implement counterfactual generation and analysis
 
-    def run_full_experiment(self):
-        """Run the complete experiment pipeline."""
+    def run_full_experiment(self, session_id: Optional[str] = None):
+        """
+        Run the complete experiment pipeline.
+
+        Args:
+            session_id: Optional session identifier for tracking
+        """
+        import time
+        import traceback
+        from datetime import datetime
+
+        # Track session ID
+        if session_id:
+            self.session_id = session_id
+        elif not self.session_id:
+            self.session_id = f"exp_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+        experiment_start = time.time()
+        current_phase = 0
+
         try:
+            # Emit experiment start callback
+            if self.callback:
+                self.callback.on_experiment_start(
+                    session_id=self.session_id,
+                    config=self.config,
+                    total_phases=6  # 6 implemented phases (1-6)
+                )
+
             # Start MLflow run
             if self.tracker:
                 self.tracker.start_run()
                 self.tracker.log_configuration()
 
-            # Run all phases
+            # Phase 1: Design
+            current_phase = 1
+            phase_start = time.time()
+            if self.callback:
+                self.callback.on_phase_start(1, "Experimental Design", 1)
             self.run_phase_1_design()
+            if self.callback:
+                self.callback.on_phase_complete(1, 1, time.time() - phase_start)
+
+            # Phase 2: Prompts
+            current_phase = 2
+            phase_start = time.time()
+            total_prompts = sum(len(p) for p in self.config['prompts'].values())
+            if self.callback:
+                self.callback.on_phase_start(2, "Prompt Engineering", total_prompts)
             self.run_phase_2_prompts()
+            if self.callback:
+                self.callback.on_phase_complete(2, total_prompts, time.time() - phase_start)
+
+            # Phase 3: Generation
+            current_phase = 3
+            phase_start = time.time()
+            total_images = sum(len(p) for p in self.config['prompts'].values()) * \
+                          self.config['generation']['num_images_per_prompt']
+            if self.callback:
+                self.callback.on_phase_start(3, "Image Generation", total_images)
             self.run_phase_3_generation()
+            if self.callback:
+                self.callback.on_phase_complete(3, total_images, time.time() - phase_start)
+
+            # Phase 4: Analysis
+            current_phase = 4
+            phase_start = time.time()
+            if self.callback:
+                self.callback.on_phase_start(4, "VQA Analysis", total_images)
             self.run_phase_4_analysis()
+            if self.callback:
+                self.callback.on_phase_complete(4, total_images, time.time() - phase_start)
+
+            # Phase 5: Statistics
+            current_phase = 5
+            phase_start = time.time()
+            if self.callback:
+                self.callback.on_phase_start(5, "Statistical Analysis", 1)
             self.run_phase_5_statistics()
+            if self.callback:
+                self.callback.on_phase_complete(5, 1, time.time() - phase_start)
+
+            # Phase 6: Counterfactual
+            current_phase = 6
+            phase_start = time.time()
+            if self.callback:
+                self.callback.on_phase_start(6, "Counterfactual Testing", 0)
             self.run_phase_6_counterfactual()
+            if self.callback:
+                self.callback.on_phase_complete(6, 0, time.time() - phase_start)
 
             logger.info("\n" + "=" * 80)
             logger.info("EXPERIMENT COMPLETE")
             logger.info("=" * 80)
-            logger.info(f"Total images generated: {sum(len(r) for r in self.generation_results.values())}")
+            total_gen = sum(len(r) for r in self.generation_results.values())
+            logger.info(f"Total images generated: {total_gen}")
             logger.info(f"Total images analyzed: {len(self.analysis_results)}")
             logger.info(f"Results saved to: data/results/")
 
             if self.tracker:
                 logger.info(f"MLflow tracking: {self.config['mlflow']['tracking_uri']}")
 
+            # Emit experiment complete callback
+            if self.callback:
+                self.callback.on_experiment_complete(
+                    session_id=self.session_id,
+                    total_time_seconds=time.time() - experiment_start,
+                    phases_completed=6
+                )
+
         except Exception as e:
             logger.error(f"Experiment failed: {e}", exc_info=True)
+
+            # Emit error callbacks
+            if self.callback:
+                error_tb = traceback.format_exc()
+                # Phase error
+                self.callback.on_phase_error(
+                    phase_num=current_phase,
+                    error_type=type(e).__name__,
+                    error_message=str(e),
+                    traceback_str=error_tb
+                )
+                # Experiment error
+                self.callback.on_experiment_error(
+                    session_id=self.session_id,
+                    error_type=type(e).__name__,
+                    error_message=str(e),
+                    failed_phase=current_phase
+                )
+
             raise
 
         finally:

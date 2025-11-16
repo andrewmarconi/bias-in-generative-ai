@@ -221,7 +221,14 @@ class BiasDetectionExperiment:
         logger.info("PHASE 4: Image Analysis - VQA Pipeline")
         logger.info("=" * 80)
 
-        logger.info(f"VQA Model: {self.config['vqa_analysis']['model']}")
+        vqa_models = self.config['vqa_analysis'].get('models', [self.config['vqa_analysis'].get('model', 'unknown')])
+        ensemble_method = self.config['vqa_analysis'].get('ensemble_method', 'single')
+        if len(vqa_models) > 1:
+            logger.info(f"VQA Ensemble: {len(vqa_models)} models ({ensemble_method})")
+            for i, model in enumerate(vqa_models, 1):
+                logger.info(f"  Model {i}: {model}")
+        else:
+            logger.info(f"VQA Model: {vqa_models[0]}")
         logger.info(f"Analyzing {len(self.config['vqa_analysis']['questions'])} demographic categories")
 
         # Flatten all image metadata

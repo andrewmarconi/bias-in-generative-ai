@@ -70,7 +70,7 @@ class VQAAnalyzer:
                 # Use float16 for memory efficiency on MPS/CUDA
                 self.model = Blip2ForConditionalGeneration.from_pretrained(
                     self.model_name,
-                    torch_dtype=torch.float16,
+                    dtype=torch.float16,
                     low_cpu_mem_usage=True
                 )
                 self.model.to(self.device)
@@ -79,7 +79,7 @@ class VQAAnalyzer:
                 # CPU mode - use full precision
                 self.model = Blip2ForConditionalGeneration.from_pretrained(
                     self.model_name,
-                    torch_dtype=torch.float32,
+                    dtype=torch.float32,
                     low_cpu_mem_usage=True
                 )
                 self.model.to(self.device)

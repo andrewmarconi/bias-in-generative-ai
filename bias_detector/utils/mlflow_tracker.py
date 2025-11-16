@@ -38,13 +38,18 @@ class MLflowTracker:
 
         experiment_name = self.mlflow_config.get('experiment_name', 'bias_detection')
         try:
+            # Try to get existing experiment
             self.experiment = mlflow.get_experiment_by_name(experiment_name)
             if self.experiment is None:
+                # Create new experiment
                 self.experiment_id = mlflow.create_experiment(experiment_name)
+                logger.info(f"Created new MLflow experiment: {experiment_name} (ID: {self.experiment_id})")
             else:
                 self.experiment_id = self.experiment.experiment_id
+                logger.info(f"Using existing MLflow experiment: {experiment_name} (ID: {self.experiment_id})")
         except Exception as e:
-            logger.warning(f"Could not set up experiment: {e}")
+            logger.warning(f"Could not set up custom experiment, using default: {e}")
+            # Let MLflow handle experiment creation automatically
             self.experiment_id = None
 
         logger.info(f"MLflow tracking initialized: {tracking_uri}")
@@ -62,15 +67,23 @@ class MLflowTracker:
         if run_name is None:
             run_name = self.config['experiment']['name']
 
-        mlflow.start_run(
-            experiment_id=self.experiment_id,
-            run_name=run_name
-        )
+        # Start run with experiment_id if available, otherwise let MLflow use default
+        if self.experiment_id is not None:
+            mlflow.start_run(
+                experiment_id=self.experiment_id,
+                run_name=run_name
+            )
+        else:
+            mlflow.start_run(run_name=run_name)
 
-        run_id = mlflow.active_run().info.run_id
-        logger.info(f"Started MLflow run: {run_id}")
-
-        return run_id
+        active_run = mlflow.active_run()
+        if active_run is not None and hasattr(active_run, 'info') and active_run.info is not None:
+            run_id = active_run.info.run_id
+            logger.info(f"Started MLflow run: {run_id}")
+            return run_id
+        else:
+            logger.error("Failed to start MLflow run")
+            raise RuntimeError("Could not start MLflow run")
 
     def log_configuration(self):
         """Log experiment configuration parameters."""

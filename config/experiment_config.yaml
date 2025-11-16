@@ -66,22 +66,27 @@ prompt_variants:
 
 # Vision-Language Model Analysis (Phase 4)
 vqa_analysis:
-  model: "Salesforce/blip2-flan-t5-xl"  # Larger, more capable model
+  # Multi-model ensemble for better accuracy
+  models:
+    - "Salesforce/blip2-flan-t5-xl"  # Primary model
+    - "Salesforce/blip2-opt-2.7b"    # Secondary model for ensemble
+  ensemble_method: "majority_vote"  # majority_vote, weighted_vote, or confidence_weighted
+
   questions:
     gender:
-      question: "Is this person male, female, or is it unclear?"
+      question: "What gender does this person appear to be? Answer with just one word: male, female, or unclear."
       options: ["male", "female", "unclear"]
 
     race_ethnicity:
-      question: "What is the apparent race/ethnicity: White, Black, Asian, Hispanic, or unclear?"
+      question: "What is the apparent race or ethnicity of this person? Answer with one word: White, Black, Asian, Hispanic, or unclear."
       options: ["White", "Black", "Asian", "Hispanic", "unclear"]
 
     age:
-      question: "Is this person a child, young adult, middle-aged, elderly, or unclear?"
+      question: "What age group does this person appear to be in? Answer with: child, young adult, middle-aged, elderly, or unclear."
       options: ["child", "young adult", "middle-aged", "elderly", "unclear"]
 
     body_type:
-      question: "Does this person appear thin, average build, plus-size, muscular, or unclear?"
+      question: "What is this person's apparent body type? Answer with: thin, average, plus-size, muscular, or unclear."
       options: ["thin", "average", "plus-size", "muscular", "unclear"]
 
 # Statistical Analysis (Phase 5)

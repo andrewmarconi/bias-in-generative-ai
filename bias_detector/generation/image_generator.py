@@ -7,24 +7,23 @@ Implements systematic image generation with version control and metadata trackin
 
 import logging
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 import json
 from tqdm import tqdm
 
-from mflux.generate import Flux1
-from mflux.config.config import Config
-from mflux.config.model_config import ModelConfig as FluxModelConfig
+import torch
+from diffusers import DiffusionPipeline
 
 logger = logging.getLogger(__name__)
 
 
 class ImageGenerator:
     """
-    Generate images using mflux FLUX models.
-    
-    Implements systematic image generation with version control and metadata tracking
-    as specified in the research framework (Phase 3).
+    Generate images using HuggingFace diffusers.
+
+    Supports multiple diffusion models for systematic image generation with version control
+    and metadata tracking as specified in the research framework (Phase 3).
     """
 
     def __init__(self, config: Dict[str, Any], progress_callback=None):
@@ -37,7 +36,7 @@ class ImageGenerator:
         """
         self.config = config
         self.generation_config = config['generation']
-        
+
         # Get output directory safely
         output_config = config.get('output', {})
         if not isinstance(output_config, dict):
@@ -48,38 +47,71 @@ class ImageGenerator:
 
         # Progress callback for UI updates
         self.progress_callback = progress_callback
-        
-        # Initialize FLUX model
-        self.model_name = self.generation_config.get('model', 'dev')
-        logger.info(f"Initializing FLUX.1-{self.model_name} model with mflux...")
-        
-        # Map model names to ModelConfig factory functions
-        model_map = {
-            'dev': FluxModelConfig.dev,
-            'schnell': FluxModelConfig.schnell,
-            'krea_dev': FluxModelConfig.krea_dev
-        }
-        
-        # Get factory function and call it to get the actual ModelConfig instance
-        model_factory = model_map.get(self.model_name, FluxModelConfig.dev)
+
+        # Device detection
+        if torch.cuda.is_available():
+            self.device = "cuda"
+        elif torch.backends.mps.is_available():
+            self.device = "mps"
+        else:
+            self.device = "cpu"
+
+        logger.info(f"Image generation device: {self.device}")
+
+        # Model configuration
+        self.model_id = self.generation_config.get('model', 'runwayml/stable-diffusion-v1-5')
+        self.pipeline = None
+        self._initialize_pipeline()
+
+    def _initialize_pipeline(self):
+        """Initialize the diffusion pipeline."""
         try:
-            self.model_config = model_factory()
-            # Initialize model immediately during setup to avoid threading issues
-            logger.info(f"Loading FLUX.1-{self.model_name} model...")
-            self.flux = Flux1(model_config=self.model_config)
-            logger.info(f"FLUX.1-{self.model_name} model loaded successfully")
+            logger.info(f"Loading diffusion model: {self.model_id}")
+
+            # Load the appropriate pipeline based on model type
+            if 'stable-diffusion' in self.model_id.lower():
+                self.pipeline = DiffusionPipeline.from_pretrained(
+                    self.model_id,
+                    torch_dtype=torch.float16 if self.device != "cpu" else torch.float32,
+                    safety_checker=None,  # Disable safety checker for research
+                    requires_safety_checker=False
+                )
+            elif 'flux' in self.model_id.lower():
+                # For FLUX models, use the standard diffusion pipeline
+                self.pipeline = DiffusionPipeline.from_pretrained(
+                    self.model_id,
+                    torch_dtype=torch.float16 if self.device != "cpu" else torch.float32
+                )
+            else:
+                # Generic diffusion pipeline
+                self.pipeline = DiffusionPipeline.from_pretrained(
+                    self.model_id,
+                    torch_dtype=torch.float16 if self.device != "cpu" else torch.float32
+                )
+
+            # Move to device and enable memory efficiency
+            self.pipeline.to(self.device)
+
+            if hasattr(self.pipeline, 'enable_attention_slicing'):
+                self.pipeline.enable_attention_slicing()
+
+            if self.device == "cuda" and hasattr(self.pipeline, 'enable_xformers_memory_efficient_attention'):
+                try:
+                    self.pipeline.enable_xformers_memory_efficient_attention()
+                except ImportError:
+                    logger.warning("xformers not available, using standard attention")
+
+            logger.info(f"Diffusion pipeline loaded successfully: {self.model_id}")
+
         except Exception as e:
-            logger.error(f"Failed to initialize FLUX.1-{self.model_name} model: {e}")
+            logger.error(f"Failed to load diffusion model {self.model_id}: {e}")
             import traceback
             logger.error(f"Full traceback: {traceback.format_exc()}")
-            self.model_config = None
-            self.flux = None
+            self.pipeline = None
 
     def _initialize_model(self):
-        """Check if FLUX model is initialized (models are loaded during __init__ now)."""
-        if self.flux is None:
-            logger.error("FLUX model not available - initialization failed during setup")
-        return self.flux is not None
+        """Check if diffusion pipeline is initialized."""
+        return self.pipeline is not None
 
     def generate_images_for_prompt(self, prompt: str, prompt_id: str, num_images: Optional[int] = None) -> List[Dict[str, Any]]:
         """
@@ -114,23 +146,24 @@ class ImageGenerator:
                 import random
                 seed = random.randint(0, 2**32 - 1)
             
-            # Generate image
-            generation_config = Config(
-                num_inference_steps=self.generation_config.get('num_inference_steps', 4),
-                width=self.generation_config.get('width', 1024),
-                height=self.generation_config.get('height', 1024),
-                guidance=self.generation_config.get('guidance', 3.5)
-            )
-            
-            if self.flux is None:
-                logger.error("FLUX model not available - skipping image generation")
+            # Generate image using diffusers
+            if self.pipeline is None:
+                logger.error("Diffusion pipeline not available - skipping image generation")
                 continue
-                
-            result = self.flux.generate_image(
-                seed=seed,
-                prompt=prompt,
-                config=generation_config
-            )
+
+            # Set up generation parameters
+            generator = torch.Generator(device=self.device).manual_seed(seed)
+
+            with torch.no_grad():
+                result = self.pipeline(
+                    prompt=prompt,
+                    num_inference_steps=self.generation_config.get('num_inference_steps', 20),
+                    width=self.generation_config.get('width', 512),
+                    height=self.generation_config.get('height', 512),
+                    guidance_scale=self.generation_config.get('guidance', 7.5),
+                    generator=generator,
+                    output_type="pil"
+                ).images[0]
             
             # Save the image and get the path
             output_dir = Path(self.config['data']['output_dirs']['images'])
@@ -156,7 +189,7 @@ class ImageGenerator:
             Dictionary mapping prompt IDs to lists of image metadata
         """
         if not self._initialize_model():
-            logger.error("FLUX model not initialized - cannot generate images")
+            logger.error("Diffusion pipeline not initialized - cannot generate images")
             return {}
             
         all_results = {}
@@ -237,23 +270,24 @@ class ImageGenerator:
                     import random
                     seed = random.randint(0, 2**32 - 1)
                 
-                # Generate image
-                generation_config = Config(
-                    num_inference_steps=self.generation_config.get('num_inference_steps', 4),
-                    width=self.generation_config.get('width', 1024),
-                    height=self.generation_config.get('height', 1024),
-                    guidance=self.generation_config.get('guidance', 3.5)
-                )
-                
-                if self.flux is None:
-                    logger.error("FLUX model not available - skipping counterfactual image generation")
+                # Generate image using diffusers
+                if self.pipeline is None:
+                    logger.error("Diffusion pipeline not available - skipping counterfactual image generation")
                     continue
-                    
-                result = self.flux.generate_image(
-                    seed=seed,
-                    prompt=modified_prompt,
-                    config=generation_config
-                )
+
+                # Set up generation parameters
+                generator = torch.Generator(device=self.device).manual_seed(seed)
+
+                with torch.no_grad():
+                    result = self.pipeline(
+                        prompt=modified_prompt,
+                        num_inference_steps=self.generation_config.get('num_inference_steps', 20),
+                        width=self.generation_config.get('width', 512),
+                        height=self.generation_config.get('height', 512),
+                        guidance_scale=self.generation_config.get('guidance', 7.5),
+                        generator=generator,
+                        output_type="pil"
+                    ).images[0]
                 
                 # Save the image and get the path
                 output_dir = Path(self.config['data']['output_dirs']['images'])
@@ -265,7 +299,7 @@ class ImageGenerator:
                     results[modified_id] = []
                 
                 results[modified_id].append({
-                    'path': str(image_path),
+                    'image_path': str(image_path),
                     'seed': seed,
                     'prompt': modified_prompt,
                     'prompt_id': modified_id,

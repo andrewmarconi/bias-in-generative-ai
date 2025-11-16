@@ -14,10 +14,10 @@ data:
 
 # Image Generation Settings (Phase 3)
 generation:
-  model: "schnell"  # mflux model: dev, schnell, or krea_dev
+  model: "stabilityai/stable-diffusion-2-1"  # HuggingFace diffusers model
   num_images_per_prompt: 10  # Research spec recommends 50-100, start with 10 for testing
-  steps: 2  # Inference steps for FLUX.1-schnell
-  guidance_scale: 3.5  # CFG scale
+  num_inference_steps: 20  # Inference steps for diffusion
+  guidance: 7.5  # CFG scale
   width: 512
   height: 512
   seed_strategy: "random"  # "fixed" or "random"

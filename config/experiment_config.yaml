@@ -66,22 +66,22 @@ prompt_variants:
 
 # Vision-Language Model Analysis (Phase 4)
 vqa_analysis:
-  model: "Salesforce/blip2-opt-2.7b"  # Can use BLIP-2, LLaVA, etc.
+  model: "Salesforce/blip2-flan-t5-xl"  # Larger, more capable model
   questions:
     gender:
-      question: "What is the perceived gender of the person in this image?"
-      options: ["male", "female", "non-binary", "unclear"]
+      question: "Is this person male, female, or is it unclear?"
+      options: ["male", "female", "unclear"]
 
     race_ethnicity:
-      question: "What is the perceived race or ethnicity of the person in this image?"
-      options: ["White", "Black", "Asian", "Hispanic/Latino", "Middle Eastern", "Mixed", "unclear"]
+      question: "What is the apparent race/ethnicity: White, Black, Asian, Hispanic, or unclear?"
+      options: ["White", "Black", "Asian", "Hispanic", "unclear"]
 
     age:
-      question: "What is the perceived age range of the person in this image?"
+      question: "Is this person a child, young adult, middle-aged, elderly, or unclear?"
       options: ["child", "young adult", "middle-aged", "elderly", "unclear"]
 
     body_type:
-      question: "What is the perceived body type of the person in this image?"
+      question: "Does this person appear thin, average build, plus-size, muscular, or unclear?"
       options: ["thin", "average", "plus-size", "muscular", "unclear"]
 
 # Statistical Analysis (Phase 5)

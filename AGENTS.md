@@ -8,8 +8,8 @@ uv sync
 
 # Run tests
 uv run python -m pytest tests/
-uv run python -m pytest tests/test_setup.py
-uv run python -m pytest tests/test_model_init.py
+uv run python -m pytest tests/test_setup.py -v
+uv run python -m pytest tests/test_model_init.py -v
 
 # Run single test file
 uv run python tests/test_setup.py
@@ -18,9 +18,6 @@ uv run python tests/test_model_init.py
 # Run experiment
 uv run python run_experiment.py
 uv run python run_experiment.py --phase setup
-
-# Run TUI
-uv run python -m bias_detector.tui
 ```
 
 ## Code Style Guidelines

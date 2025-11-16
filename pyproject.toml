@@ -1,7 +1,7 @@
 [project]
 name = "biasingenerativeai"
 version = "0.1.0"
-description = "Add your description here"
+description = "Bias Detection Framework for Generative AI Image Models"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -20,5 +20,24 @@ dependencies = [
     "matplotlib>=3.10.7",
     "seaborn>=0.13.2",
     "tqdm>=4.66.0",
-    "textual>=0.40.0",
 ]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["bias_detector*"]
+
+[tool.setuptools.package-dir]
+"" = "."
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[project.scripts]
+bias-detector = "bias_detector.cli:main"

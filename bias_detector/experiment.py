@@ -7,7 +7,6 @@ Orchestrates all phases of the bias detection pipeline.
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
-import sys
 import threading
 import time
 
@@ -16,15 +15,8 @@ from bias_detector.generation.image_generator import ImageGenerator
 from bias_detector.analysis.vqa_analyzer import VQAAnalyzer
 from bias_detector.statistics.bias_metrics import BiasMetrics
 from bias_detector.utils.mlflow_tracker import MLflowTracker
+# from bias_detector.callbacks import ProgressCallback  # TODO: Use proper protocol when type checker supports it
 
-# Set up logging - redirect to file to avoid TUI interference
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('data/logs/experiment.log'),
-    ]
-)
 logger = logging.getLogger(__name__)
 
 
@@ -503,46 +495,3 @@ class BiasDetectionExperiment:
                 self.tracker.end_run()
 
 
-def main():
-    """Main entry point."""
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        description="Bias Detection Framework for Generative AI Image Models"
-    )
-    parser.add_argument(
-        '--config',
-        type=str,
-        default='config/experiment_config.yaml',
-        help='Path to experiment configuration file'
-    )
-    parser.add_argument(
-        '--phase',
-        type=str,
-        choices=['all', 'setup', 'generate', 'analyze', 'statistics'],
-        default='all',
-        help='Which phase to run'
-    )
-
-    args = parser.parse_args()
-
-    # Create and run experiment
-    experiment = BiasDetectionExperiment(config_path=args.config)
-    experiment.setup()
-
-    if args.phase == 'all':
-        experiment.run_full_experiment()
-    elif args.phase == 'setup':
-        logger.info("Setup complete!")
-    elif args.phase == 'generate':
-        experiment.run_phase_1_design()
-        experiment.run_phase_2_prompts()
-        experiment.run_phase_3_generation()
-    elif args.phase == 'analyze':
-        experiment.run_phase_4_analysis()
-    elif args.phase == 'statistics':
-        experiment.run_phase_5_statistics()
-
-
-if __name__ == "__main__":
-    main()

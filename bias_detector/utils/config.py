@@ -25,20 +25,18 @@ def load_config(config_path: str = "config/experiment_config.yaml") -> Dict[str,
     return config
 
 
-def validate_config(config: Dict[str, Any]) -> bool:
+def validate_config(config: Dict[str, Any]) -> None:
     """
     Validate that configuration contains required fields.
 
     Args:
         config: Configuration dictionary
 
-    Returns:
-        True if valid, raises ValueError otherwise
+    Raises:
+        ValueError: If configuration is invalid
     """
     required_sections = ['experiment', 'generation', 'prompts', 'vqa_analysis', 'statistics']
 
     for section in required_sections:
         if section not in config:
             raise ValueError(f"Missing required configuration section: {section}")
-
-    return True

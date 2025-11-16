@@ -1,61 +1,76 @@
-#!/usr/bin/env python3
 """
-Test that the basic setup works without loading models.
+Tests for basic setup and imports.
 """
 
-import sys
+import pytest
 from pathlib import Path
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+from bias_detector.utils.config import load_config, validate_config
+from bias_detector.generation.image_generator import ImageGenerator
+from bias_detector.analysis.vqa_analyzer import VQAAnalyzer
+from bias_detector.statistics.bias_metrics import BiasMetrics
+from bias_detector.statistics.visualizations import BiasVisualizer
+from bias_detector.utils.mlflow_tracker import MLflowTracker
 
-print("Testing imports...")
 
-try:
-    from bias_detector.utils.config import load_config, validate_config
-    print("✓ Config utilities")
+def test_imports():
+    """Test that all main components can be imported."""
+    # This test will fail if any imports are broken
+    assert ImageGenerator is not None
+    assert VQAAnalyzer is not None
+    assert BiasMetrics is not None
+    assert BiasVisualizer is not None
+    assert MLflowTracker is not None
 
-    from bias_detector.generation.image_generator import ImageGenerator
-    print("✓ ImageGenerator")
 
-    from bias_detector.analysis.vqa_analyzer import VQAAnalyzer
-    print("✓ VQAAnalyzer")
-
-    from bias_detector.statistics.bias_metrics import BiasMetrics
-    print("✓ BiasMetrics")
-
-    from bias_detector.statistics.visualizations import BiasVisualizer
-    print("✓ BiasVisualizer")
-
-    from bias_detector.utils.mlflow_tracker import MLflowTracker
-    print("✓ MLflowTracker")
-
-    print("\nLoading configuration...")
+def test_config_loading():
+    """Test that configuration can be loaded and validated."""
     config = load_config("config/experiment_config.yaml")
-    validate_config(config)
-    print("✓ Configuration loaded and validated")
 
-    print("\nConfiguration Summary:")
-    print(f"  Experiment: {config['experiment']['name']}")
-    print(f"  Model: FLUX.1-{config['generation']['model']}")
-    print(f"  Images per prompt: {config['generation']['num_images_per_prompt']}")
-    print(f"  VQA Model: {config['vqa_analysis']['model']}")
-    print(f"  Bias categories: {', '.join(config['bias_categories'])}")
+    # Should not raise an exception
+    validate_config(config)
+
+    # Check required sections exist
+    required_sections = ['experiment', 'generation', 'prompts', 'vqa_analysis', 'statistics']
+    for section in required_sections:
+        assert section in config, f"Missing required section: {section}"
+
+
+def test_config_summary():
+    """Test that config has expected structure and values."""
+    config = load_config("config/experiment_config.yaml")
+
+    # Check experiment section
+    assert 'experiment' in config
+    assert 'name' in config['experiment']
+
+    # Check generation section
+    assert 'generation' in config
+    assert 'model' in config['generation']
+    assert 'num_images_per_prompt' in config['generation']
+
+    # Check prompts section
+    assert 'prompts' in config
+    assert isinstance(config['prompts'], dict)
+    assert len(config['prompts']) > 0
+
+    # Check VQA section
+    assert 'vqa_analysis' in config
+    assert 'model' in config['vqa_analysis']
+
+    # Check statistics section
+    assert 'statistics' in config
+    assert 'significance_level' in config['statistics']
+
+
+def test_calculate_expected_totals():
+    """Test calculation of expected totals from config."""
+    config = load_config("config/experiment_config.yaml")
 
     num_prompts = sum(len(prompts) for prompts in config['prompts'].values())
-    total_images = num_prompts * config['generation']['num_images_per_prompt']
-    print(f"  Total prompts: {num_prompts}")
-    print(f"  Expected images: {total_images}")
+    images_per_prompt = config['generation']['num_images_per_prompt']
+    expected_images = num_prompts * images_per_prompt
 
-    print("\n✅ All tests passed! Setup is working correctly.")
-    print("\nNext steps:")
-    print("  1. Test model initialization: uv run python test_model_init.py")
-    print("  2. Run a quick test: uv run python example_usage.py --example 1")
-    print("  3. Run full experiment: uv run python run_experiment.py")
-    print("\nNote: First run will download model weights (~2-5 GB) which may take time.")
-
-except Exception as e:
-    print(f"\n❌ Error: {e}")
-    import traceback
-    traceback.print_exc()
-    sys.exit(1)
+    assert num_prompts > 0, "Should have at least one prompt"
+    assert images_per_prompt > 0, "Should generate at least one image per prompt"
+    assert expected_images > 0, "Should expect to generate some images"

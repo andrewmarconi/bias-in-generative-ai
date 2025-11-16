@@ -8,10 +8,7 @@ Usage:
     uv run python run_experiment.py --config custom.yaml  # Custom config
 """
 
-import sys
-from pathlib import Path
-
-from bias_detector.experiment import main
+from bias_detector.cli import main
 
 if __name__ == "__main__":
     main()

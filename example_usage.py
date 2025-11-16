@@ -5,11 +5,8 @@ Example usage of the Bias Detection Framework.
 This script demonstrates basic usage patterns.
 """
 
-import sys
 from pathlib import Path
-
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+import pandas as pd
 
 from bias_detector.utils.config import load_config
 from bias_detector.generation.image_generator import ImageGenerator
@@ -50,7 +47,8 @@ def example_1_quick_test():
     print("\nGender distribution:")
     print(distribution)
 
-    chi_square = metrics.chi_square_test(distribution['count'])
+    counts = pd.Series(distribution['count'])  # Ensure it's a Series
+    chi_square = metrics.chi_square_test(counts)
     print(f"\nChi-square test: χ² = {chi_square['chi_square_statistic']:.2f}, "
           f"p = {chi_square['p_value']:.4f}")
     print(f"Cramer's V = {chi_square['cramers_v']:.3f} ({chi_square['effect_size']})")

@@ -237,51 +237,9 @@ Extend `BiasMetrics` class with new statistical methods
 - **Ethical Considerations**: This tool is for research and auditing purposes; results require careful interpretation
 - **Documentation**: See [docs/spec.md](docs/spec.md) for complete research methodology and literature references
 
-## Interactive TUI Interface
-
-The framework includes a comprehensive Terminal User Interface (TUI) for real-time experiment monitoring:
-
-### TUI Features
-- **Real-time Progress Monitoring**: Live phase progress with metrics and ETA
-- **Experiment Control**: Pause, resume, and cancel experiments
-- **Configuration Management**: Interactive YAML editor with validation and locking
-- **Metadata Inspection**: Browse experiment results and configurations
-- **History Management**: Search, filter, and manage past experiments
-- **Help System**: Built-in help overlay (press H)
-- **Error Display**: Structured error panel with tracebacks
-- **Resize Handling**: Adaptive layouts for different terminal sizes
-- **Progress Debouncing**: Prevents UI spam from rapid updates
-- **Structured Logging**: Enhanced logging with performance timing and context
-
-### TUI Commands
-```bash
-# Launch interactive TUI
-uv run python -m bias_detector.tui
-
-# With custom configuration
-uv run python -m bias_detector.tui --config custom_config.yaml
-
-# With custom sessions directory
-uv run python -m bias_detector.tui --sessions /custom/path
-```
-
-### TUI Architecture
-- **Screens**: ProgressScreen, MetadataScreen, ConfigEditorScreen, HistoryScreen, HelpScreen
-- **Widgets**: PhaseProgressBar, PhaseList, MetricDisplay, ErrorPanel
-- **State Management**: StateManager with session persistence
-- **Event System**: Queue-based progress updates with debouncing
-- **Error Handling**: StructuredLogger with JSON output and performance timing
-
-### TUI Polish Features (Phase 7)
-- **Help Overlay**: Modal help screen with keyboard shortcuts (H)
-- **Terminal Resize**: Responsive layouts for all screen sizes
-- **Error Panel**: Comprehensive error display with filtering and details
-- **Update Debouncing**: 200ms debounce to prevent UI spam
-- **Structured Logging**: Component-aware logging with performance metrics
-
-
 ## Active Technologies
-- Python >= 3.12 (matching existing project requirement) (001-interactive-tui)
+- Python >= 3.12 (matching existing project requirement)
 
 ## Recent Changes
-- 001-interactive-tui: Added Python >= 3.12 (matching existing project requirement)
+- Removed TUI interface due to multiprocessing conflicts with mflux library
+- Reverted to CLI-only interface for better compatibility

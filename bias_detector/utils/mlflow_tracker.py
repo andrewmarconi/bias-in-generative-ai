@@ -100,8 +100,15 @@ class MLflowTracker:
         log_param("guidance_scale", gen_config.get('guidance_scale', 3.5))
         log_param("seed_strategy", gen_config.get('seed_strategy', 'fixed'))
 
-        # Log VQA model
-        log_param("vqa_model", self.config['vqa_analysis']['model'])
+        # Log VQA model(s) - handle both single model and ensemble
+        vqa_models = self.config['vqa_analysis'].get('models', [self.config['vqa_analysis'].get('model', 'unknown')])
+        if len(vqa_models) > 1:
+            log_param("vqa_ensemble", True)
+            log_param("vqa_models", ",".join(vqa_models))
+            log_param("ensemble_method", self.config['vqa_analysis'].get('ensemble_method', 'majority_vote'))
+        else:
+            log_param("vqa_ensemble", False)
+            log_param("vqa_model", vqa_models[0])
 
         # Log bias categories
         log_param("bias_categories", ",".join(self.config['bias_categories']))

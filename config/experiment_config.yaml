@@ -113,7 +113,7 @@ counterfactual:
 
 # MLflow Tracking (Phase 8)
 mlflow:
-  tracking_uri: "sqlite:///mlflow.db"
+  tracking_uri: "file:./mlruns"  # File-based tracking for local development
   experiment_name: "bias_detection"
   log_artifacts: true
   log_images: true

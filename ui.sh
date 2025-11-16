@@ -1,7 +1,6 @@
 #!/bin/bash
 
 echo "Loading MLFlow UI..."
-uv run mlflow ui \
-    --backend-store-uri sqlite:///mlflow.db \
-    --host 0.0.0.0 \
-    --port 5001
+echo "Access at: http://localhost:5001"
+echo "Press Ctrl+C to stop"
+uv run mlflow ui --port 5001

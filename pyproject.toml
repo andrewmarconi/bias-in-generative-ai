@@ -6,10 +6,8 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "mlflow>=3.6.0",
-    "diffusers",
     "torch",
     "transformers",
-    "open-clip-torch",
     "pandas",
     "numpy",
     "scipy",

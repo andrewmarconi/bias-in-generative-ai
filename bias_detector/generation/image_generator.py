@@ -139,7 +139,7 @@ class ImageGenerator:
             result.save(image_path)
             
             results.append({
-                'path': str(image_path),
+                'image_path': str(image_path),
                 'seed': seed,
                 'prompt': prompt,
                 'prompt_id': prompt_id,

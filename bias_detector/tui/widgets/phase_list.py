@@ -18,6 +18,8 @@ class PhaseListItem(Static):
         self.phase_name = name
         self.status = status
         super().__init__(self._format_text(), **kwargs)
+        # Make clickable
+        self.can_focus = True
 
     def _format_text(self) -> str:
         """Format the phase item text with status icon."""
@@ -35,6 +37,20 @@ class PhaseListItem(Static):
         """Update phase status."""
         self.status = status
         self.update(self._format_text())
+
+    def on_click(self) -> None:
+        """Handle click on phase item."""
+        # Emit custom message for phase selection
+        from textual.message import Message
+
+        class PhaseSelected(Message):
+            def __init__(self, phase_num: int, phase_name: str, status: str):
+                self.phase_num = phase_num
+                self.phase_name = phase_name
+                self.status = status
+                super().__init__()
+
+        self.post_message(PhaseSelected(self.phase_num, self.phase_name, self.status))
 
 
 class PhaseList(VerticalScroll):
@@ -55,6 +71,16 @@ class PhaseList(VerticalScroll):
 
     PhaseList PhaseListItem {
         margin: 0 1;
+        padding: 1;
+    }
+
+    PhaseList PhaseListItem:hover {
+        background: $accent-darken-2;
+    }
+
+    PhaseList PhaseListItem:focus {
+        background: $accent;
+        color: $text;
     }
 
     PhaseList .in_progress {

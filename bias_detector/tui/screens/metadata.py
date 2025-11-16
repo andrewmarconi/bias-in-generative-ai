@@ -370,8 +370,16 @@ class MetadataScreen(Screen):
     
     def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:
         """Handle tab activation."""
-        # Update content when tab is activated
-        self._update_tab_content()
+        # Update content for the active tab
+        tab_id = event.tab.id
+        if tab_id == "generation-tab":
+            self._update_generation_tab(self.config_state.get("sections", {}).get("generation", {}))
+        elif tab_id == "prompts-tab":
+            self._update_prompts_tab(self.config_state.get("sections", {}).get("prompts", {}))
+        elif tab_id == "vqa-tab":
+            self._update_vqa_tab(self.config_state.get("sections", {}).get("vqa_analysis", {}))
+        elif tab_id == "statistics-tab":
+            self._update_statistics_tab(self.config_state.get("sections", {}).get("statistics", {}))
     
     def _start_file_watcher(self) -> None:
         """Start background task to watch for config file changes."""

@@ -24,17 +24,19 @@ class VQAAnalyzer:
     as specified in the research framework (Phase 4).
     """
 
-    def __init__(self, config: Dict[str, Any], device: Optional[str] = None):
+    def __init__(self, config: Dict[str, Any], device: Optional[str] = None, progress_callback=None):
         """
         Initialize VQA analyzer.
 
         Args:
             config: Experiment configuration dictionary
             device: Device to run model on ('cuda', 'mps', 'cpu', or None for auto)
+            progress_callback: Optional callback for progress updates
         """
         self.config = config
         self.vqa_config = config['vqa_analysis']
         self.model_name = self.vqa_config.get('model', 'Salesforce/blip2-opt-2.7b')
+        self.progress_callback = progress_callback
 
         # Determine device
         if device is None:
@@ -50,27 +52,42 @@ class VQAAnalyzer:
         logger.info(f"Initializing VQA model: {self.model_name} on {self.device}")
 
         # Load model and processor
-        self.processor = AutoProcessor.from_pretrained(self.model_name, use_fast=True)
-
+        try:
+            logger.info(f"Loading processor for {self.model_name}...")
+            self.processor = AutoProcessor.from_pretrained(self.model_name, use_fast=True)
+            logger.info(f"Processor loaded successfully for {self.model_name}")
+        except Exception as e:
+            logger.error(f"Failed to load processor for {self.model_name}: {e}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            self.processor = None
+            self.model = None
+            return
+        
         # Use memory-efficient loading with float16 for GPU/MPS
-        if self.device != "cpu":
-            # Use float16 for memory efficiency on MPS/CUDA
-            self.model = Blip2ForConditionalGeneration.from_pretrained(
-                self.model_name,
-                torch_dtype=torch.float16,
-                low_cpu_mem_usage=True
-            )
-            self.model.to(self.device)
-            logger.info(f"VQA model loaded with float16 precision on {self.device}")
-        else:
-            # CPU mode - use full precision
-            self.model = Blip2ForConditionalGeneration.from_pretrained(
-                self.model_name,
-                torch_dtype=torch.float32,
-                low_cpu_mem_usage=True
-            )
-            self.model.to(self.device)
-            logger.info("VQA model loaded in full precision (CPU mode)")
+        try:
+            if self.device != "cpu":
+                # Use float16 for memory efficiency on MPS/CUDA
+                self.model = Blip2ForConditionalGeneration.from_pretrained(
+                    self.model_name,
+                    torch_dtype=torch.float16,
+                    low_cpu_mem_usage=True
+                )
+                self.model.to(self.device)
+                logger.info(f"VQA model loaded with float16 precision on {self.device}")
+            else:
+                # CPU mode - use full precision
+                self.model = Blip2ForConditionalGeneration.from_pretrained(
+                    self.model_name,
+                    torch_dtype=torch.float32,
+                    low_cpu_mem_usage=True
+                )
+                self.model.to(self.device)
+                logger.info("VQA model loaded in full precision (CPU mode)")
+        except Exception as e:
+            logger.error(f"Failed to load VQA model {self.model_name}: {e}")
+            self.model = None
+            return
 
         self.model.eval()
         logger.info("VQA model loaded successfully")
@@ -121,6 +138,10 @@ class VQAAnalyzer:
         Returns:
             Answer text from the model
         """
+        if self.model is None or self.processor is None:
+            logger.error("VQA model or processor not initialized")
+            return "unclear"
+        
         # Prepare inputs
         inputs = self.processor(image, question, return_tensors="pt").to(self.device)
 
@@ -179,9 +200,14 @@ class VQAAnalyzer:
             List of analysis results with metadata
         """
         results = []
+        total_images = len(image_metadata_list)
 
-        for metadata in tqdm(image_metadata_list, desc="Analyzing images", unit="image"):
-            image_path = metadata['image_path']
+        for i, metadata in enumerate(tqdm(image_metadata_list, desc="Analyzing images", unit="image")):
+            image_path = metadata.get('image_path') or metadata.get('path')
+
+            if image_path is None:
+                logger.error(f"No image path found in metadata: {metadata}")
+                continue
 
             # Analyze image
             analysis = self.analyze_image(image_path)
@@ -193,6 +219,15 @@ class VQAAnalyzer:
             }
 
             results.append(result)
+
+            # Report progress to callback
+            if self.progress_callback:
+                self.progress_callback.on_progress(
+                    phase_num=4,  # Phase 4: VQA Analysis
+                    items_done=i + 1,
+                    items_total=total_images,
+                    message=f"Analyzed image {i + 1}/{total_images}"
+                )
 
         return results
 
@@ -228,6 +263,10 @@ class VQAAnalyzer:
         Returns:
             Generated caption
         """
+        if self.model is None or self.processor is None:
+            logger.error("VQA model or processor not initialized")
+            return "Unable to generate caption - model not loaded"
+        
         image = Image.open(image_path).convert('RGB')
 
         # Use BLIP-2 for captioning without a question

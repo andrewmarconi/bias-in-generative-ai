@@ -85,7 +85,7 @@ class ConfigEditorScreen(Screen):
         self.has_unsaved_changes = False
         
         # UI components
-        self.status_label: Optional[Label] = None
+        self.status_label: Optional[Static] = None
         self.validation_errors: Optional[Static] = None
         self.save_button: Optional[Button] = None
         self.reset_button: Optional[Button] = None
@@ -123,7 +123,7 @@ class ConfigEditorScreen(Screen):
         self._load_configuration()
         
         # Setup UI references
-        self.status_label = self.query_one("#status-label", Label)
+        self.status_label = self.query_one("#status-label", Static)
         self.validation_errors = self.query_one("#validation-errors", Static)
         self.save_button = self.query_one("#save-button", Button)
         self.reset_button = self.query_one("#reset-button", Button)
@@ -143,17 +143,15 @@ class ConfigEditorScreen(Screen):
     def _setup_tabbed_content(self) -> None:
         """Setup the tabbed content with panes."""
         tabbed_content = self.query_one("#config-tabs", TabbedContent)
-        
-        # Add tab panes
-        generation_pane = TabPane("Generation", Container(id="generation-content"), id="generation-tab")
-        prompts_pane = TabPane("Prompts", Container(id="prompts-content"), id="prompts-tab")
-        vqa_pane = TabPane("VQA Analysis", Container(id="vqa-content"), id="vqa-tab")
-        stats_pane = TabPane("Statistics", Container(id="statistics-content"), id="statistics-tab")
-        
-        tabbed_content.add_pane(generation_pane)
-        tabbed_content.add_pane(prompts_pane)
-        tabbed_content.add_pane(vqa_pane)
-        tabbed_content.add_pane(stats_pane)
+
+        # Clear existing content
+        tabbed_content.remove_children()
+
+        # Add tab panes using the correct API
+        tabbed_content.add_pane(TabPane("Generation", Container(id="generation-content"), id="generation-tab"))
+        tabbed_content.add_pane(TabPane("Prompts", Container(id="prompts-content"), id="prompts-tab"))
+        tabbed_content.add_pane(TabPane("VQA Analysis", Container(id="vqa-content"), id="vqa-tab"))
+        tabbed_content.add_pane(TabPane("Statistics", Container(id="statistics-content"), id="statistics-tab"))
 
     def _load_configuration(self) -> None:
         """Load configuration from file and populate UI."""
@@ -162,7 +160,15 @@ class ConfigEditorScreen(Screen):
             config_dict = self.state_manager.get_config_state(self.config_path)
             
             # Convert to ConfigurationState
-            self.config_state = ConfigurationState(**config_dict)
+            self.config_state = ConfigurationState(
+                config_path=config_dict["config_path"],
+                locked=config_dict["locked"],
+                locked_by_session=config_dict["locked_by_session"],
+                last_modified=config_dict["last_modified"],
+                validation_status=config_dict["validation_status"],
+                validation_errors=config_dict["validation_errors"],
+                sections=config_dict["sections"]
+            )
             self.original_config = config_dict["sections"].copy()
             self.current_config = config_dict["sections"].copy()
             
@@ -175,13 +181,12 @@ class ConfigEditorScreen(Screen):
     def _setup_generation_tab(self) -> None:
         """Setup the generation configuration tab."""
         try:
-            # Get the generation tab pane
-            tab_pane = self.query_one("#generation-tab", TabPane)
-            content = tab_pane.query_one(Container)
-            
+            # Get the generation content container
+            content = self.query_one("#generation-content", Container)
+
             # Clear existing content
             content.remove_children()
-            
+
             generation_config = self.current_config.get("generation", {})
             
             content.mount(
@@ -258,10 +263,9 @@ class ConfigEditorScreen(Screen):
     def _setup_prompts_tab(self) -> None:
         """Setup the prompts configuration tab."""
         try:
-            # Get prompts tab pane
-            tab_pane = self.query_one("#prompts-tab", TabPane)
-            content = tab_pane.query_one(Container)
-            
+            # Get prompts content container
+            content = self.query_one("#prompts-content", Container)
+
             # Clear existing content
             content.remove_children()
             
@@ -308,10 +312,9 @@ class ConfigEditorScreen(Screen):
     def _setup_vqa_tab(self) -> None:
         """Setup the VQA analysis configuration tab."""
         try:
-            # Get VQA tab pane
-            tab_pane = self.query_one("#vqa-tab", TabPane)
-            content = tab_pane.query_one(Container)
-            
+            # Get VQA content container
+            content = self.query_one("#vqa-content", Container)
+
             # Clear existing content
             content.remove_children()
             
@@ -370,10 +373,9 @@ class ConfigEditorScreen(Screen):
     def _setup_statistics_tab(self) -> None:
         """Setup the statistics configuration tab."""
         try:
-            # Get statistics tab pane
-            tab_pane = self.query_one("#statistics-tab", TabPane)
-            content = tab_pane.query_one(Container)
-            
+            # Get statistics content container
+            content = self.query_one("#statistics-content", Container)
+
             # Clear existing content
             content.remove_children()
             
@@ -592,12 +594,15 @@ class ConfigEditorScreen(Screen):
                 self.config_state.validation_status = (
                     ValidationStatus.INVALID if errors else ValidationStatus.VALID
                 )
-            
-            # Update UI
-            self._update_ui_state()
-            
-            # Emit change message
-            self.post_message(self.ConfigChanged(self.config_state))
+
+                # Update UI
+                self._update_ui_state()
+
+                # Emit change message
+                self.post_message(self.ConfigChanged(self.config_state))
+            else:
+                # Update UI even if config_state is None
+                self._update_ui_state()
 
     # Event handlers
     def on_input_changed(self, event: Input.Changed) -> None:
@@ -750,4 +755,4 @@ Locking:
                 pass
         
         # Refresh validation status
-        self._update_validation_status()
+        self._update_ui_state()

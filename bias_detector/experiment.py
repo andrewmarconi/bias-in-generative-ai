@@ -11,16 +11,19 @@ import sys
 import threading
 import time
 
-from .utils.config import load_config, validate_config
-from .generation.image_generator import ImageGenerator
-from .analysis.vqa_analyzer import VQAAnalyzer
-from .statistics.bias_metrics import BiasMetrics
-from .utils.mlflow_tracker import MLflowTracker
+from bias_detector.utils.config import load_config, validate_config
+from bias_detector.generation.image_generator import ImageGenerator
+from bias_detector.analysis.vqa_analyzer import VQAAnalyzer
+from bias_detector.statistics.bias_metrics import BiasMetrics
+from bias_detector.utils.mlflow_tracker import MLflowTracker
 
-# Set up logging
+# Set up logging - redirect to file to avoid TUI interference
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('data/logs/experiment.log'),
+    ]
 )
 logger = logging.getLogger(__name__)
 
@@ -75,8 +78,8 @@ class BiasDetectionExperiment:
         # Pause/resume state
         self.is_paused: bool = False
         self.should_stop: bool = False
-        self.pause_event = None
-        self.stop_event = None
+        self.pause_event = threading.Event()
+        self.stop_event = threading.Event()
 
     def setup(self):
         """Initialize all experiment components."""
@@ -86,11 +89,21 @@ class BiasDetectionExperiment:
 
         # Initialize image generator
         logger.info("\n[1/4] Initializing Image Generator (mflux)...")
-        self.generator = ImageGenerator(self.config)
+        try:
+            self.generator = ImageGenerator(self.config, progress_callback=self.callback)
+            logger.info("Image generator initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize image generator: {e}")
+            self.generator = None
 
         # Initialize VQA analyzer
         logger.info("\n[2/4] Initializing VQA Analyzer...")
-        self.analyzer = VQAAnalyzer(self.config)
+        try:
+            self.analyzer = VQAAnalyzer(self.config, progress_callback=self.callback)
+            logger.info("VQA analyzer initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize VQA analyzer: {e}")
+            self.analyzer = None
 
         # Initialize statistical metrics
         logger.info("\n[3/4] Initializing Statistical Analysis...")
@@ -101,10 +114,6 @@ class BiasDetectionExperiment:
         self.tracker = MLflowTracker(self.config)
 
         logger.info("\nSetup complete!")
-        
-        # Initialize pause/stop events
-        self.pause_event = threading.Event()
-        self.stop_event = threading.Event()
 
     def pause(self) -> None:
         """Pause the experiment."""
@@ -184,7 +193,24 @@ class BiasDetectionExperiment:
         logger.info(f"Seed strategy: {self.config['generation']['seed_strategy']}")
         logger.info("\nGenerating images...")
 
-        self.generation_results = self.generator.generate_for_all_prompts()
+        if self.generator is None:
+            logger.error("Image generator not initialized - skipping generation")
+            self.generation_results = {}
+        else:
+            try:
+                results = self.generator.generate_for_all_prompts()
+                if results is None:
+                    logger.error("Generator returned None - using empty results")
+                    self.generation_results = {}
+                else:
+                    self.generation_results = results
+            except Exception as e:
+                logger.error(f"Error during image generation: {e}")
+                self.generation_results = {}
+
+        # Ensure generation_results is always a dict
+        if self.generation_results is None:
+            self.generation_results = {}
 
         total_images = sum(len(results) for results in self.generation_results.values())
         logger.info(f"\nGeneration complete! Total images: {total_images}")
@@ -210,20 +236,27 @@ class BiasDetectionExperiment:
         all_images = []
         for results in self.generation_results.values():
             all_images.extend(results)
-
+        
         logger.info(f"\nAnalyzing {len(all_images)} images...")
-
+        
         # Analyze all images
-        self.analysis_results = self.analyzer.analyze_batch(all_images)
-
-        logger.info(f"Analysis complete!")
-
-        # Save results
-        self.analyzer.save_results(
-            self.analysis_results,
-            "data/processed/analysis_results.json"
-        )
-
+        if self.analyzer is None:
+            logger.error("VQA analyzer not initialized - skipping analysis")
+            self.analysis_results = []
+        else:
+            try:
+                self.analysis_results = self.analyzer.analyze_batch(all_images)
+                logger.info(f"Analysis complete!")
+                
+                # Save results
+                self.analyzer.save_results(
+                    self.analysis_results,
+                    "data/processed/analysis_results.json"
+                )
+            except Exception as e:
+                logger.error(f"Error during analysis: {e}")
+                self.analysis_results = []
+        
         # Log to MLflow
         if self.tracker:
             self.tracker.log_analysis_results(self.analysis_results)
@@ -241,29 +274,41 @@ class BiasDetectionExperiment:
         logger.info("Calculating statistical metrics...")
 
         # Generate comprehensive summary
-        self.statistical_summary = self.metrics.generate_summary_report(
-            self.analysis_results
-        )
+        if self.metrics is None:
+            logger.error("Statistical metrics not initialized - skipping analysis")
+            self.statistical_summary = {}
+        else:
+            try:
+                self.statistical_summary = self.metrics.generate_summary_report(
+                    self.analysis_results
+                )
+                logger.info("Statistical analysis complete!")
+            except Exception as e:
+                logger.error(f"Error during statistical analysis: {e}")
+                self.statistical_summary = {}
 
         # Display key findings
         logger.info("\n" + "-" * 80)
         logger.info("KEY FINDINGS")
         logger.info("-" * 80)
 
-        for category, analysis in self.statistical_summary['bias_analyses'].items():
-            logger.info(f"\n{category.upper()}:")
-            logger.info(f"  Sample size: {analysis['sample_size']}")
+        if not self.statistical_summary or 'bias_analyses' not in self.statistical_summary:
+            logger.info("No statistical analysis results to display")
+        else:
+            for category, analysis in self.statistical_summary['bias_analyses'].items():
+                logger.info(f"\n{category.upper()}:")
+                logger.info(f"  Sample size: {analysis['sample_size']}")
 
-            chi_square = analysis['chi_square_test']
-            logger.info(f"  χ² = {chi_square['chi_square_statistic']:.2f}, "
-                       f"p = {chi_square['p_value']:.4f}")
-            logger.info(f"  Cramer's V = {chi_square['cramers_v']:.3f} "
-                       f"({chi_square['effect_size']})")
-            logger.info(f"  Significant: {'YES' if chi_square['significant'] else 'NO'}")
+                chi_square = analysis['chi_square_test']
+                logger.info(f"  χ² = {chi_square['chi_square_statistic']:.2f}, "
+                           f"p = {chi_square['p_value']:.4f}")
+                logger.info(f"  Cramer's V = {chi_square['cramers_v']:.3f} "
+                           f"({chi_square['effect_size']})")
+                logger.info(f"  Significant: {'YES' if chi_square['significant'] else 'NO'}")
 
-            parity = analysis['demographic_parity']
-            logger.info(f"  Max deviation from uniform: {parity['max_deviation']:.3f}")
-            logger.info(f"  Demographic parity: {'SATISFIED' if parity['parity_satisfied'] else 'VIOLATED'}")
+                parity = analysis['demographic_parity']
+                logger.info(f"  Max deviation from uniform: {parity['max_deviation']:.3f}")
+                logger.info(f"  Demographic parity: {'SATISFIED' if parity['parity_satisfied'] else 'VIOLATED'}")
 
         # Save statistical summary
         import json

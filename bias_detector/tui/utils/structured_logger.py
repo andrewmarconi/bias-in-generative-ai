@@ -38,12 +38,12 @@ class StructuredLogger:
         # Clear existing handlers
         self.logger.handlers.clear()
         
-        # Console handler with structured formatting
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(logging.INFO)
-        console_formatter = StructuredFormatter()
-        console_handler.setFormatter(console_formatter)
-        self.logger.addHandler(console_handler)
+        # Console handler disabled for TUI to avoid display interference
+        # Logs go to file only when TUI is running
+        if not log_file:
+            # Create default log file if none provided
+            log_file = Path("data/logs/tui.log")
+            log_file.parent.mkdir(parents=True, exist_ok=True)
         
         # File handler for detailed logs
         if log_file:
@@ -223,6 +223,10 @@ def get_logger(name: str = "bias_detector.tui", log_file: Optional[Path] = None)
     """
     global _tui_logger
     if _tui_logger is None:
+        # Create default log file for TUI if none provided
+        if log_file is None:
+            log_file = Path("data/logs/tui.log")
+            log_file.parent.mkdir(parents=True, exist_ok=True)
         _tui_logger = StructuredLogger(name, log_file)
     return _tui_logger
 

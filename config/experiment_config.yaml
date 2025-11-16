@@ -6,6 +6,12 @@ experiment:
   description: "Detecting implicit biases in generative AI image models"
   random_seed: 42
 
+# Data directories
+data:
+  output_dirs:
+    images: "data/raw/images"
+    processed: "data/processed"
+
 # Image Generation Settings (Phase 3)
 generation:
   model: "schnell"  # mflux model: dev, schnell, or krea_dev

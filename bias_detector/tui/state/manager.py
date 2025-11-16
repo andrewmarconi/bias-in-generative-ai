@@ -107,6 +107,10 @@ class StateManager:
         # Track config locks
         self._config_locks: Dict[Path, Any] = {}
 
+        # Session templates directory
+        self.templates_dir = self.sessions_dir / "templates"
+        self.templates_dir.mkdir(exist_ok=True)
+
     def _load_index(self):
         """Load session index from disk or initialize empty."""
         if self.index_path.exists() and self.index_path.stat().st_size > 0:
@@ -289,6 +293,130 @@ class StateManager:
                             return session
                     except FileNotFoundError:
                         pass
+
+    def save_session_template(self, session_id: str, template_name: str, description: str = "") -> None:
+        """
+        Save a session as a reusable template.
+
+        Args:
+            session_id: Session to save as template
+            template_name: Name for the template
+            description: Optional description
+
+        Raises:
+            FileNotFoundError: If session doesn't exist
+        """
+        session = self.get_session(session_id)
+
+        template_data = {
+            "name": template_name,
+            "description": description,
+            "created_from": session_id,
+            "created_at": datetime.now().isoformat(),
+            "config_snapshot": session.config_snapshot,
+            "metadata": session.metadata.to_dict()
+        }
+
+        template_path = self.templates_dir / f"{template_name}.json"
+        with open(template_path, 'w') as f:
+            json.dump(template_data, f, indent=2)
+
+    def list_session_templates(self) -> List[Dict[str, Any]]:
+        """
+        List available session templates.
+
+        Returns:
+            List of template metadata dictionaries
+        """
+        templates = []
+        for template_file in self.templates_dir.glob("*.json"):
+            try:
+                with open(template_file, 'r') as f:
+                    template_data = json.load(f)
+                    template_data["filename"] = template_file.name
+                    templates.append(template_data)
+            except (json.JSONDecodeError, FileNotFoundError):
+                continue
+        return templates
+
+    def create_session_from_template(self, template_name: str) -> ExperimentSession:
+        """
+        Create a new session from a template.
+
+        Args:
+            template_name: Name of the template to use
+
+        Returns:
+            New ExperimentSession based on template
+
+        Raises:
+            FileNotFoundError: If template doesn't exist
+        """
+        template_path = self.templates_dir / f"{template_name}.json"
+        if not template_path.exists():
+            raise FileNotFoundError(f"Template {template_name} not found")
+
+        with open(template_path, 'r') as f:
+            template_data = json.load(f)
+
+        # Create session from template config
+        return self.create_session(template_data["config_snapshot"])
+
+    def clone_session(self, session_id: str, new_session_id: Optional[str] = None) -> ExperimentSession:
+        """
+        Clone an existing session with a new ID.
+
+        Args:
+            session_id: Session to clone
+            new_session_id: Optional new session ID (auto-generated if None)
+
+        Returns:
+            New cloned ExperimentSession
+
+        Raises:
+            FileNotFoundError: If source session doesn't exist
+        """
+        source_session = self.get_session(session_id)
+
+        # Generate new session ID if not provided
+        if new_session_id is None:
+            new_session_id = f"exp_{datetime.now().strftime('%Y%m%d_%H%M%S')}_clone"
+
+        # Create new session with cloned data
+        cloned_session = ExperimentSession(
+            session_id=new_session_id,
+            start_time=datetime.now().isoformat(),
+            status=SessionStatus.PENDING,
+            current_phase=1,
+            config_snapshot=source_session.config_snapshot.copy(),
+            phase_progress=[
+                PhaseProgress(
+                    phase=p.phase,
+                    name=p.name,
+                    status=PhaseStatus.PENDING,  # Reset to pending
+                    items_done=0,
+                    items_total=0
+                ) for p in source_session.phase_progress
+            ],
+            metadata=source_session.metadata
+        )
+
+        # Save cloned session
+        self._save_session(cloned_session)
+
+        # Update index
+        index_entry = SessionIndexEntry(
+            session_id=new_session_id,
+            start_time=cloned_session.start_time,
+            status=cloned_session.status.value,
+            config_name="experiment_config.yaml",
+            total_images=0,
+            phases_completed=0
+        )
+        self._index["experiments"].insert(0, index_entry)
+        self._save_index()
+
+        return cloned_session
 
         # Fallback: scan index for active sessions
         for entry in self._index["experiments"]:

@@ -15,8 +15,9 @@ from textual.containers import Container, Vertical
 from textual.geometry import Size
 
 from ..widgets.progress_bar import PhaseProgressBar
-from ..widgets.phase_list import PhaseList
+from ..widgets.phase_list import PhaseList, PhaseListItem
 from ..widgets.metric_display import MetricDisplay
+from ..widgets.phase_detail_modal import PhaseDetailModal
 from ..state.session import PHASE_NAMES
 
 
@@ -85,8 +86,13 @@ class ProgressScreen(Screen):
         self._polling_interval = None
 
     def compose(self) -> ComposeResult:
-        """Compose the progress screen."""
+        """Compose the progress screen UI."""
         yield Header()
+
+        # Experiment status header
+        with Container(id="status-header"):
+            yield Static("Experiment Status: Idle", id="experiment-status", classes="experiment-status")
+            yield Static("Click on phases for details", classes="status-hint")
 
         # Current phase progress
         with Container(id="current-phase-container"):
@@ -100,7 +106,7 @@ class ProgressScreen(Screen):
 
         # Phase list
         with Container(id="phase-list-container"):
-            yield Static("All Phases", classes="section-title")
+            yield Static("All Phases (Click for details)", classes="section-title")
             self.phase_list = PhaseList()
             yield self.phase_list
 
@@ -120,6 +126,13 @@ class ProgressScreen(Screen):
         self._last_update_time = 0
         self._update_debounce_ms = 200  # Debounce updates to 200ms
         self._pending_updates = {}
+
+        # Experiment status tracking
+        self.experiment_status = "idle"  # idle, running, paused, completed, failed
+        self.experiment_start_time: Optional[float] = None
+        self.current_phase_num: Optional[int] = None
+        self.phase_start_times: Dict[int, float] = {}
+        self.phase_progress: Dict[int, Dict[str, Any]] = {}
 
         # Start polling loop if event queue is provided
         if self.event_queue:
@@ -176,7 +189,11 @@ class ProgressScreen(Screen):
             items_done: Items completed
             items_total: Total items
         """
-        # Store the update
+        # Ensure screen is mounted and initialized
+        if not hasattr(self, '_pending_updates'):
+            return
+            
+        # Store update
         self._pending_updates['phase_progress'] = {
             'phase_name': phase_name,
             'items_done': items_done,
@@ -195,6 +212,10 @@ class ProgressScreen(Screen):
             phase_num: Phase number (1-10)
             status: New status
         """
+        # Ensure screen is mounted and initialized
+        if not hasattr(self, '_pending_updates'):
+            return
+            
         # Store the update
         self._pending_updates['phase_status'] = {
             'phase_num': phase_num,
@@ -219,6 +240,10 @@ class ProgressScreen(Screen):
             estimated_remaining_seconds: Estimated time remaining
             items_per_second: Processing rate
         """
+        # Ensure screen is mounted and initialized
+        if not hasattr(self, '_pending_updates'):
+            return
+            
         # Store the update
         self._pending_updates['metrics'] = {
             'elapsed_seconds': elapsed_seconds,
@@ -253,15 +278,19 @@ class ProgressScreen(Screen):
         Handle a single progress event.
 
         Args:
-            event: Event dictionary with 'type' and event-specific fields
+            event: Event dictionary with 'event' and event-specific fields
         """
-        event_type = event.get("type")
+        event_type = event.get("event")
+
+        # Handle PhaseEvent enum values
+        if hasattr(event_type, 'value'):
+            event_type = event_type.value
 
         if event_type == "experiment_start":
             self._handle_experiment_start(event)
         elif event_type == "phase_start":
             self._handle_phase_start(event)
-        elif event_type == "progress":
+        elif event_type == "phase_progress":
             self._handle_progress(event)
         elif event_type == "phase_complete":
             self._handle_phase_complete(event)
@@ -274,7 +303,11 @@ class ProgressScreen(Screen):
 
     def _handle_experiment_start(self, event: Dict[str, Any]) -> None:
         """Handle experiment start event."""
+        self.experiment_status = "running"
+        self.experiment_start_time = time.time()
         self.start_experiment_tracking()
+        self._update_experiment_status_display()
+
         # Reset all phases to pending
         if self.phase_list:
             self.phase_list.reset()
@@ -284,6 +317,16 @@ class ProgressScreen(Screen):
         phase_num = event.get("phase_num")
         phase_name = event.get("phase_name")
         items_total = event.get("items_total", 100)
+
+        # Track phase timing
+        if phase_num:
+            self.current_phase_num = phase_num
+            self.phase_start_times[phase_num] = time.time()
+            self.phase_progress[phase_num] = {
+                'items_done': 0,
+                'items_total': items_total,
+                'start_time': time.time()
+            }
 
         # Update phase status in list
         if self.phase_list and phase_num:
@@ -300,13 +343,26 @@ class ProgressScreen(Screen):
         items_done = event.get("items_done", 0)
         items_total = event.get("items_total", 100)
 
+        # Track phase progress
+        if phase_num and phase_num in self.phase_progress:
+            self.phase_progress[phase_num]['items_done'] = items_done
+            self.phase_progress[phase_num]['items_total'] = items_total
+
         # Update progress bar
         if self.progress_bar:
             self.progress_bar.update_progress(items_done, items_total)
 
-        # Update metrics if we have a metric display
+        # Update metrics with ETA calculation
         if self.metrics:
-            self.metrics.compute_and_update(items_done, items_total)
+            eta = self._calculate_eta(phase_num or 1, items_done, items_total)
+            elapsed = time.time() - (self.experiment_start_time or time.time())
+            rate = items_done / elapsed if elapsed > 0 else 0
+
+            self.metrics.update_metrics(
+                elapsed_seconds=int(elapsed),
+                estimated_remaining_seconds=int(eta) if eta else None,
+                items_per_second=rate
+            )
 
     def _handle_phase_complete(self, event: Dict[str, Any]) -> None:
         """Handle phase completion event."""
@@ -331,6 +387,9 @@ class ProgressScreen(Screen):
 
     def _handle_experiment_complete(self, event: Dict[str, Any]) -> None:
         """Handle experiment completion event."""
+        self.experiment_status = "completed"
+        self._update_experiment_status_display()
+
         session_id = event.get("session_id", "unknown")
         total_time = event.get("total_time_seconds", 0)
         phases_completed = event.get("phases_completed", 0)
@@ -353,11 +412,63 @@ class ProgressScreen(Screen):
 
     def _handle_experiment_error(self, event: Dict[str, Any]) -> None:
         """Handle experiment error event."""
+        self.experiment_status = "failed"
+        self._update_experiment_status_display()
+
         if self.phase_list:
             self.phase_list.update_phase_status(
-                event.get("phase_num", 1), 
+                event.get("phase_num", 1),
                 "error"
             )
+
+    def _update_experiment_status_display(self) -> None:
+        """Update the experiment status display."""
+        status_widget = self.query_one("#experiment-status", Static)
+        if status_widget:
+            status_colors = {
+                "idle": "dim",
+                "running": "bold green",
+                "paused": "bold yellow",
+                "completed": "bold blue",
+                "failed": "bold red"
+            }
+            color = status_colors.get(self.experiment_status, "white")
+            status_widget.update(f"Experiment Status: [{color}]{self.experiment_status.title()}[/]")
+
+    def _calculate_eta(self, current_phase: int, items_done: int, items_total: int) -> Optional[float]:
+        """Calculate estimated time remaining for current phase."""
+        if not self.experiment_start_time or items_total <= 0:
+            return None
+
+        # Calculate progress rate
+        elapsed = time.time() - self.experiment_start_time
+        if elapsed <= 0 or items_done <= 0:
+            return None
+
+        progress_rate = items_done / elapsed  # items per second
+        remaining_items = items_total - items_done
+
+        if progress_rate <= 0:
+            return None
+
+        return remaining_items / progress_rate
+
+    def on_phase_selected(self, message) -> None:
+        """Handle phase selection for detail view."""
+        # Show phase detail modal
+        phase_progress = self.phase_progress.get(message.phase_num, {})
+        eta = self._calculate_eta(message.phase_num,
+                                phase_progress.get('items_done', 0),
+                                phase_progress.get('items_total', 100))
+
+        # For now, just show a simple notification (modal implementation would be complex)
+        self.notify(
+            f"Phase {message.phase_num}: {message.phase_name}\n"
+            f"Status: {message.status.title()}\n"
+            f"Click to view details (modal coming soon)",
+            title="Phase Details",
+            timeout=5
+        )
 
     def action_pause_experiment(self) -> None:
         """Pause the current experiment."""

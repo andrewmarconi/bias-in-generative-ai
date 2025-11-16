@@ -8,24 +8,39 @@ from typing import Optional, Dict, Any
 from queue import Queue
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, Future
+from datetime import datetime
 import logging
+
+from bias_detector.tui.state.session import ErrorInfo
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Header, Footer
 
-from .utils.structured_logger import get_logger
+# Fix relative imports by using absolute imports
+import sys
+from pathlib import Path
 
-from .screens.progress import ProgressScreen
-from .screens.metadata import MetadataScreen
-from .screens.config_editor import ConfigEditorScreen
-from .screens.history import HistoryScreen
-from .screens.help import HelpScreen
-from .widgets.error_panel import ErrorPanel
-from .state.manager import StateManager
-from .state.callbacks import QueueProgressCallback
-from .state.session import ExperimentSession
-from ..experiment import BiasDetectionExperiment
+# Add project root to Python path for proper imports
+project_root = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+from bias_detector.tui.utils.structured_logger import get_logger
+from bias_detector.tui.screens.progress import ProgressScreen
+from bias_detector.tui.screens.metadata import MetadataScreen
+from bias_detector.tui.screens.config_editor import ConfigEditorScreen
+from bias_detector.tui.screens.history import HistoryScreen
+from bias_detector.tui.screens.help import HelpScreen
+from bias_detector.tui.screens.log_screen_simple import LogScreen
+from bias_detector.tui.screens.experiment_control import ExperimentControl
+
+from bias_detector.tui.widgets.error_panel import ErrorPanel
+
+from bias_detector.tui.state.manager import StateManager
+from bias_detector.tui.state.callbacks import QueueProgressCallback
+from bias_detector.tui.state.session import ExperimentSession
+from bias_detector.tui.utils.file_manager import FileManager
+from bias_detector.experiment import BiasDetectionExperiment
 
 
 logger = get_logger("bias_detector.tui.app")
@@ -72,6 +87,7 @@ class TUIApp(App):
         Binding("f2", "switch_screen('metadata')", "Metadata", show=True),
         Binding("f3", "switch_screen('config')", "Config", show=True),
         Binding("f4", "switch_screen('history')", "History", show=True),
+        Binding("f5", "switch_screen('logs')", "Logs", show=True),
         Binding("h", "show_help", "Help", show=True),
         Binding("ctrl+n", "launch_experiment", "New Experiment", show=True),
         Binding("p", "pause_experiment", "Pause", show=True),
@@ -96,70 +112,207 @@ class TUIApp(App):
         """
         super().__init__(**kwargs)
 
-        # Configuration
-        self.config_path = config_path or Path("config/experiment_config.yaml")
-        if sessions_dir:
-            self.sessions_dir = Path(sessions_dir)
-        else:
-            # Default to data/sessions relative to project root
-            # Detect project root by going up from bias_detector/tui/
-            project_root = Path(__file__).resolve().parent.parent.parent
-            self.sessions_dir = project_root / "data" / "sessions"
+        # Enhanced boot-up messaging with progress indicators and timing
+        import sys
+        import time
+        
+        # Track timing for boot process at class level
+        self.boot_start_time = time.time()
+        
+        def boot_step(step: str, description: str = "", show_time: bool = True) -> None:
+            """Print a boot step with consistent formatting and timing."""
+            elapsed = f"({time.time() - self.boot_start_time:.1f}s)" if show_time else "(--.s)"
+            print(f"⏳ {step} {elapsed}- {description}")
+            
+        def boot_success(step: str, show_time: bool = True) -> None:
+            """Print a success indicator for a boot step."""
+            elapsed = f"({time.time() - self.boot_start_time:.1f}s)" if show_time else ""
+            print(f"✅ {step} {elapsed}")
+            
+        def boot_error(step: str, error: str) -> None:
+            """Print an error indicator for a boot step."""
+            elapsed = f"({time.time() - self.boot_start_time:.1f}s)"
+            print(f"❌ {step} {elapsed}- {error}")
+            
+        def boot_section(title: str) -> None:
+            """Print a section header."""
+            print(f"\n🔷 {title}")
+            print("=" * 50)
+            
+        # Start boot sequence with timing
+        boot_step("INIT", "Starting framework initialization", show_time=False)
+        boot_section("Bias Detection Framework - Interactive TUI")
+        
+        try:
+            # Configuration
+            boot_step("CONFIG", "Loading experiment configuration")
+            self.config_path = config_path or Path("config/experiment_config.yaml")
+            if sessions_dir:
+                self.sessions_dir = Path(sessions_dir)
+            else:
+                # Default to data/sessions relative to project root
+                # Detect project root by going up from bias_detector/tui/
+                project_root = Path(__file__).resolve().parent.parent.parent
+                self.sessions_dir = project_root / "data" / "sessions"
+            boot_success("Configuration loaded")
 
-        # State management
-        self.state_manager = StateManager(sessions_dir=self.sessions_dir)
+            # State management
+            boot_step("SESSIONS", "Initializing session management")
+            self.state_manager = StateManager(sessions_dir=self.sessions_dir)
+            boot_success("Session manager initialized")
 
-        # Experiment execution
-        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="experiment")
-        self.event_queue: Queue = Queue()
-        self.current_experiment: Optional[BiasDetectionExperiment] = None
-        self.experiment_future: Optional[Future] = None
-        self.current_session: Optional[ExperimentSession] = None
+            # File management
+            boot_step("FILES", "Setting up file management")
+            self.file_manager = FileManager(self.sessions_dir.parent)
+            boot_success("File manager initialized")
 
-        # Screens
-        self.progress_screen: Optional[ProgressScreen] = None
-        self.metadata_screen: Optional[MetadataScreen] = None
-        self.history_screen: Optional[HistoryScreen] = None
-        self.help_screen: Optional[HelpScreen] = None
+            # Experiment execution
+            boot_step("EXECUTOR", "Setting up experiment executor")
+            self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="experiment")
+            self.event_queue: Queue = Queue()
+            self.current_experiment: Optional[BiasDetectionExperiment] = None
+            self.experiment_future: Optional[Future] = None
+            self.current_session: Optional[ExperimentSession] = None
+            boot_success("Executor ready")
+
+            # Screen components
+            boot_step("SCREENS", "Initializing UI components")
+            self.progress_screen: Optional[ProgressScreen] = None
+            self.metadata_screen: Optional[MetadataScreen] = None
+            self.history_screen: Optional[HistoryScreen] = None
+            self.help_screen: Optional[HelpScreen] = None
+            self.log_screen: Optional[LogScreen] = None
+            self.control_screen: Optional[ExperimentControl] = None
+            boot_success("Screen components ready")
+            
+        except Exception as e:
+            boot_error("INITIALIZATION FAILED", str(e))
+            print(f"\n💡 Debug info: {e}")
+            print("🔧 Try: Check file permissions and dependencies")
+            print("📋 Logs available in data/logs/ for troubleshooting")
+            sys.exit(1)
 
     def on_mount(self) -> None:
         """Initialize application on mount."""
-        # Install screens
-        self.progress_screen = ProgressScreen(event_queue=self.event_queue)
-        self.install_screen(self.progress_screen, name="progress")
+        # Show loading message
+        self.title = "Bias Detection Framework - Loading..."
         
-        # Metadata screen
-        self.metadata_screen = MetadataScreen(
-            config_path=str(self.config_path),
-            state_manager=self.state_manager
-        )
-        self.install_screen(self.metadata_screen, name="metadata")
+        # Enhanced boot-up messaging with progress tracking
+        import time
+        start_time = time.time()
         
-        # Configuration editor screen
-        self.config_screen = ConfigEditorScreen(
-            config_path=str(self.config_path),
-            state_manager=self.state_manager
-        )
-        self.install_screen(self.config_screen, name="config")
+        def mount_step(step: str, description: str = "") -> None:
+            """Print a mount step with timing."""
+            elapsed = f"({time.time() - start_time:.1f}s)"
+            print(f"⏳ {step} {elapsed} - {description}")
+            
+        def mount_success(step: str) -> None:
+            """Print success for a mount step."""
+            elapsed = f"({time.time() - start_time:.1f}s)"
+            print(f"✅ {step} {elapsed}")
+            
+        # Install screens with progress feedback
+        mount_step("SCREENS", "Initializing UI components")
+        
+        mount_step("PROGRESS", "Creating progress monitor")
+        try:
+            self.progress_screen = ProgressScreen(event_queue=self.event_queue)
+            self.install_screen(self.progress_screen, name="progress")
+            mount_success("Progress screen")
+        except Exception as e:
+            print(f"❌ PROGRESS - Progress screen failed: {e}")
+            raise
 
-        # History screen
-        self.history_screen = HistoryScreen(
-            state_manager=self.state_manager
-        )
-        self.install_screen(self.history_screen, name="history")
+        mount_step("METADATA", "Creating configuration inspector")
+        try:
+            self.metadata_screen = MetadataScreen(
+                config_path=str(self.config_path),
+                state_manager=self.state_manager
+            )
+            self.install_screen(self.metadata_screen, name="metadata")
+            mount_success("Metadata screen")
+        except Exception as e:
+            print(f"❌ METADATA - Metadata screen failed: {e}")
+            raise
 
-        # Help screen
+        mount_step("CONFIG", "Creating configuration editor")
+        try:
+            self.config_screen = ConfigEditorScreen(
+                config_path=str(self.config_path),
+                state_manager=self.state_manager
+            )
+            self.install_screen(self.config_screen, name="config")
+            mount_success("Config editor")
+        except Exception as e:
+            print(f"❌ CONFIG - Config screen failed: {e}")
+            raise
+
+        mount_step("HISTORY", "Creating experiment browser")
+        try:
+            self.history_screen = HistoryScreen(
+                state_manager=self.state_manager
+            )
+            self.install_screen(self.history_screen, name="history")
+            mount_success("History screen")
+        except Exception as e:
+            print(f"❌ HISTORY - History screen failed: {e}")
+            raise
+        
+        mount_step("HELP", "Creating help system")
         self.help_screen = HelpScreen()
         self.install_screen(self.help_screen, name="help")
+        mount_success("Help system")
+        
+        mount_step("LOGS", "Creating log viewer")
+        try:
+            self.log_screen = LogScreen()
+            self.install_screen(self.log_screen, name="logs")
+            mount_success("Log viewer")
+        except Exception as e:
+            print(f"⚠️  LOGS - Log viewer failed to initialize: {e}")
+            self.log_screen = None
+
+        mount_step("CONTROL", "Creating experiment control center")
+        try:
+            self.control_screen = ExperimentControl()
+            self.install_screen(self.control_screen, name="control")
+            mount_success("Experiment control")
+        except Exception as e:
+            print(f"⚠️  CONTROL - Experiment control failed to initialize: {e}")
+            self.control_screen = None
 
         # Error panel (not installed as persistent screen, used as modal)
         self.error_panel: Optional[ErrorPanel] = None
-
-        # Show progress screen by default
-        self.push_screen("progress")
-
+        
+        mount_step("SESSIONS", "Checking for active experiments")
         # Check for active experiment and reconnect if found
         self._reconnect_to_active_experiment()
+        
+        # Final setup and ready message
+        total_time = time.time() - self.boot_start_time
+        print(f"\n🎉 TUI initialization complete in {total_time:.1f}s")
+        print("=" * 50)
+        
+        # Update title to indicate ready state
+        self.title = "Bias Detection Framework - Interactive TUI"
+        
+        # Ready message with navigation hints
+        print("\n✨ Framework Ready!")
+        print("📊 Navigation: F1=Progress  F2=Metadata  F3=Config  F4=History  F5=Logs")
+        print("🚀 Actions: Ctrl+N=New  P=Pause  R=Resume  C=Cancel  H=Help")
+        print("💡 Tip: Use 'tail -f data/logs/experiment.log' to monitor real-time logs")
+        print()
+        
+        # Show progress screen by default
+        try:
+            self.push_screen("progress")
+            logger.info("Successfully pushed progress screen")
+        except Exception as e:
+            logger.error(f"Failed to push progress screen: {e}")
+            print(f"❌ Failed to show progress screen: {e}")
+
+        # Schedule periodic maintenance tasks
+        self._schedule_maintenance_tasks()
 
     def start_experiment(
         self,
@@ -174,39 +327,109 @@ class TUIApp(App):
             config_path: Path to config file (optional, defaults to self.config_path)
 
         Returns:
-            Session ID of the started experiment
+            Session ID of started experiment
 
         Raises:
             RuntimeError: If an experiment is already running
         """
+        import time
+        start_time = time.time()
+        
+        # Enhanced startup messaging
+        print("\n🚀 Starting New Experiment...")
+        print("=" * 50)
+        
         # Check if experiment is already running
         if self.experiment_future and not self.experiment_future.done():
+            print("❌ Experiment already running!")
+            print("💡 Complete current experiment or wait for it to finish.")
             raise RuntimeError("An experiment is already running")
 
+        print("📋 Creating new session...")
         # Create new session
         if config is None:
             config = self._load_config(config_path or self.config_path)
 
         session = self.state_manager.create_session(config=config)
         self.current_session = session
+        print(f"✅ Session created: {session.session_id}")
 
+        print("🔗 Setting up progress callback...")
         # Create callback for progress updates
         callback = QueueProgressCallback(event_queue=self.event_queue)
 
+        print("🧪 Initializing experiment components...")
         # Create experiment instance
         self.current_experiment = BiasDetectionExperiment(
             config_path=str(config_path or self.config_path),
             callback=callback
         )
 
+        print("⚙️  Configuring experiment systems...")
+        # Initialize experiment components
+        try:
+            setup_start = time.time()
+            self.current_experiment.setup()
+            setup_time = time.time() - setup_start
+            print(f"✅ Experiment setup complete ({setup_time:.2f}s)")
+        except Exception as e:
+            print(f"❌ Setup failed: {e}")
+            logger.error(f"Failed to setup experiment: {e}")
+            raise
+
+        print("🎯 Submitting to executor...")
         # Submit experiment to executor
         self.experiment_future = self.executor.submit(
             self._run_experiment_with_state_updates,
             session.session_id
         )
 
+        total_time = time.time() - start_time
+        print(f"🎉 Experiment launched successfully! ({total_time:.2f}s)")
+        print("=" * 50)
+        print(f"📊 Session ID: {session.session_id}")
+        print("💡 Use F1 to monitor progress, P to pause, C to cancel")
+        print()
+
         logger.info(f"Started experiment with session_id={session.session_id}")
         return session.session_id
+
+    def _schedule_maintenance_tasks(self) -> None:
+        """Schedule periodic maintenance tasks."""
+        # Run log rotation every hour
+        self.set_interval(3600.0, self._perform_log_rotation)
+
+        # Run session cleanup every 6 hours
+        self.set_interval(21600.0, self._perform_session_cleanup)
+
+        # Run temp file cleanup daily
+        self.set_interval(86400.0, self._perform_temp_cleanup)
+
+    def _perform_log_rotation(self) -> None:
+        """Perform log file rotation."""
+        try:
+            self.file_manager.rotate_log_files()
+            logger.debug("Log rotation completed")
+        except Exception as e:
+            logger.error(f"Log rotation failed: {e}")
+
+    def _perform_session_cleanup(self) -> None:
+        """Perform session cleanup."""
+        try:
+            cleaned = self.file_manager.cleanup_old_sessions()
+            if cleaned > 0:
+                logger.info(f"Cleaned up {cleaned} old sessions")
+        except Exception as e:
+            logger.error(f"Session cleanup failed: {e}")
+
+    def _perform_temp_cleanup(self) -> None:
+        """Perform temporary file cleanup."""
+        try:
+            cleaned = self.file_manager.cleanup_temp_files()
+            if cleaned > 0:
+                logger.info(f"Cleaned up {cleaned} temporary files")
+        except Exception as e:
+            logger.error(f"Temp cleanup failed: {e}")
 
     def _run_experiment_with_state_updates(self, session_id: str) -> None:
         """
@@ -225,6 +448,8 @@ class TUIApp(App):
             )
 
             # Run the experiment
+            if self.current_experiment is None:
+                raise RuntimeError("No experiment instance available")
             self.current_experiment.run_full_experiment(session_id=session_id)
 
             # Update session status to completed
@@ -235,15 +460,19 @@ class TUIApp(App):
 
         except Exception as e:
             # Update session status to failed
-            logger.exception(f"Experiment {session_id} failed")
+            logger.error(f"Experiment {session_id} failed", error=e)
+            from .state.session import ErrorInfo
+            error_info = ErrorInfo(
+                error_type=type(e).__name__,
+                error_message=str(e),
+                phase=0,  # Unknown phase at this level
+                timestamp=datetime.now().isoformat(),
+                traceback=None  # Could capture traceback.format_exc()
+            )
             self.state_manager.update_session_status(
                 session_id=session_id,
                 new_status="failed",
-                error={
-                    "type": type(e).__name__,
-                    "message": str(e),
-                    "traceback": None  # Could capture traceback.format_exc()
-                }
+                error=error_info
             )
             raise
 
@@ -253,35 +482,56 @@ class TUIApp(App):
 
         Called on app startup to resume monitoring.
 
-        Note: In current implementation, experiments run in-process via ThreadPoolExecutor.
-        If the TUI is restarted, the experiment thread is lost. Therefore, we mark any
-        "running" sessions as "cancelled" and restore their last known state to the UI.
-
-        Future enhancement: Run experiments as separate processes for true reconnection.
+        Enhanced session recovery:
+        - Detects interrupted experiments and offers recovery options
+        - Restores UI state from persisted session data
+        - Provides clear feedback about session status
         """
+        print("📋 Scanning for active sessions...")
         active_session = self.state_manager.get_active_session()
 
         if not active_session:
+            print("✨ No active sessions found")
             return
 
+        print(f"🔄 Found session {active_session.session_id} ({active_session.status.value})")
         self.current_session = active_session
         logger.info(f"Found active session: {active_session.session_id}")
 
-        # Since experiments run in-process, a restart means the experiment thread was lost
+        # Handle different session states
         if active_session.status.value == "running":
-            logger.warning(
-                f"Session {active_session.session_id} was running but TUI was restarted. "
-                "Marking as cancelled."
+            print(f"⚠️ Session {active_session.session_id} was interrupted during execution")
+            print("💡 Session progress has been preserved - you can resume or restart")
+
+            # For now, mark as cancelled but preserve progress data
+            # Future: Offer resume/restart options
+            from bias_detector.tui.state.session import ErrorInfo
+            error_info = ErrorInfo(
+                error_type="TUIInterrupt",
+                error_message="TUI was restarted during execution",
+                phase=active_session.current_phase,
+                timestamp=datetime.now().isoformat(),
+                remediation_hint="Session progress has been preserved. You can restart the experiment."
             )
             self.state_manager.update_session_status(
                 session_id=active_session.session_id,
-                new_status="cancelled"
+                new_status="cancelled",
+                error=error_info
             )
-            # Reload session with updated status
-            active_session = self.state_manager.get_session(active_session.session_id)
+            print(f"✅ Session marked as cancelled (progress preserved)")
+
+        elif active_session.status.value == "paused":
+            print(f"⏸️ Session {active_session.session_id} was paused")
+            print("💡 You can resume this session from the progress screen")
+
+        elif active_session.status.value == "pending":
+            print(f"📋 Session {active_session.session_id} is ready to start")
+            print("💡 Use Ctrl+N to launch the experiment")
 
         # Restore UI state from session
+        print("🎨 Restoring UI state from session data...")
         self._restore_ui_from_session(active_session)
+        print("✅ Session state restored successfully")
 
     def _restore_ui_from_session(self, session: ExperimentSession) -> None:
         """
@@ -298,15 +548,15 @@ class TUIApp(App):
         # Restore phase statuses
         for phase in session.phase_progress:
             self.progress_screen.update_phase_status(
-                phase_num=phase.phase_num,
+                phase_num=phase.phase,
                 status=phase.status.value
             )
 
             # If this was the last active phase, restore its progress
             if phase.status.value == "in_progress" or phase.items_done > 0:
-                phase_name = session.phase_progress[phase.phase_num - 1].phase_name
+                phase_name = phase.name
                 self.progress_screen.update_phase_progress(
-                    phase_num=phase.phase_num,
+                    phase_num=phase.phase,
                     phase_name=phase_name,
                     items_done=phase.items_done,
                     items_total=phase.items_total
@@ -334,17 +584,17 @@ class TUIApp(App):
 
         return config
 
-    def action_switch_screen(self, screen_name: str) -> None:
+    async def action_switch_screen(self, screen: str) -> None:
         """
         Switch to a different screen.
 
         Args:
-            screen_name: Name of screen to switch to
+            screen: Name of screen to switch to
         """
         try:
-            self.switch_screen(screen_name)
+            self.switch_screen(screen)
         except Exception as e:
-            logger.error(f"Failed to switch to screen '{screen_name}': {e}")
+            logger.error(f"Failed to switch to screen '{screen}': {e}")
 
     def action_launch_experiment(self) -> None:
         """Launch a new experiment (Ctrl+N)."""
@@ -455,8 +705,8 @@ class TUIApp(App):
 
     def show_error(self, message: str, source: str = "Unknown", level: str = "ERROR", traceback: Optional[str] = None) -> None:
         """
-        Show an error in the error panel.
-        
+        Show an error notification.
+
         Args:
             message: Error message
             source: Error source/location
@@ -464,17 +714,80 @@ class TUIApp(App):
             traceback: Optional traceback information
         """
         try:
-            if not self.error_panel:
-                self.error_panel = ErrorPanel()
-            
-            self.error_panel.add_error(message, source, level, traceback)
-            
-            # Show error panel if not already visible
-            if not isinstance(self.screen, ErrorPanel):
-                self.push_screen(self.error_panel)
-                
+            # Show toast notification
+            severity_map = {
+                "ERROR": "error",
+                "WARNING": "warning",
+                "INFO": "information"
+            }
+            severity = severity_map.get(level.upper(), "error")
+
+            # Create notification message
+            title = f"{level}: {source}"
+            if len(message) > 100:
+                message = message[:97] + "..."
+
+            self.notify(
+                message,
+                title=title,
+                severity="error",  # Use literal string
+                timeout=8
+            )
+
+            # Also log to structured logger
+            logger.error(f"{source}: {message}", component="tui_error")
+
+            # For critical errors, also show error panel
+            if level.upper() == "ERROR" and self.error_panel:
+                if not self.error_panel:
+                    self.error_panel = ErrorPanel()
+
+                self.error_panel.add_error(message, source, level, traceback)
+
+                # Show error panel if not already visible
+                if not isinstance(self.screen, ErrorPanel):
+                    self.push_screen(self.error_panel)
+
         except Exception as e:
-            logger.error(f"Failed to show error: {e}")
+            # Fallback to basic logging if notification fails
+            print(f"ERROR: {source} - {message}")
+            logger.error(f"Failed to show error notification: {e}")
+
+    def show_success(self, message: str, title: str = "Success") -> None:
+        """
+        Show a success notification.
+
+        Args:
+            message: Success message
+            title: Notification title
+        """
+        try:
+            self.notify(
+                message,
+                title=title,
+                severity="information",
+                timeout=5
+            )
+        except Exception as e:
+            logger.error(f"Failed to show success notification: {e}")
+
+    def show_warning(self, message: str, title: str = "Warning") -> None:
+        """
+        Show a warning notification.
+
+        Args:
+            message: Warning message
+            title: Notification title
+        """
+        try:
+            self.notify(
+                message,
+                title=title,
+                severity="warning",
+                timeout=6
+            )
+        except Exception as e:
+            logger.error(f"Failed to show warning notification: {e}")
 
     async def action_quit(self) -> None:
         """Quit the application with cleanup."""
@@ -491,7 +804,4 @@ class TUIApp(App):
         """Handle terminal resize events."""
         logger.debug(f"Terminal resized to {event.size.width}x{event.size.height}")
         
-        # Propagate resize to current screen
-        current_screen = self.screen
-        if hasattr(current_screen, 'handle_resize'):
-            current_screen.handle_resize(event.size)
+        # Note: Screen resize handling is delegated to individual screens

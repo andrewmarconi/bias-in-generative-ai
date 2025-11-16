@@ -90,7 +90,7 @@ class HelpScreen(ModalScreen[str]):
                 
                 # Navigation shortcuts
                 yield Static("📱 Navigation", classes="help-section-title")
-                yield Static("Use F1-F4 keys to switch between screens", classes="help-text")
+                yield Static("Use F1-F5 keys to switch between screens, Q to quit", classes="help-text")
                 
                 # Keyboard shortcuts table
                 yield Static("⌨️  Keyboard Shortcuts", classes="help-section-title")
@@ -119,12 +119,13 @@ class HelpScreen(ModalScreen[str]):
             ("F2", "Metadata Screen", "Inspect experiment metadata and results"),
             ("F3", "Config Screen", "Edit experiment configuration"),
             ("F4", "History Screen", "Browse experiment history"),
+            ("F5", "Logs Screen", "View experiment logs"),
             ("Ctrl+N", "New Experiment", "Start a new bias detection experiment"),
             ("P", "Pause", "Pause the current experiment"),
             ("R", "Resume", "Resume a paused experiment"),
             ("C", "Cancel", "Cancel the current experiment"),
+            ("Q", "Quit", "Quit the application"),
             ("H", "Help", "Show this help overlay"),
-            ("Q", "Quit", "Exit the application"),
             ("Escape", "Close Modal", "Close current dialog/modal"),
             ("Tab", "Navigate", "Navigate between widgets"),
             ("Enter", "Select", "Select focused item or confirm action"),
@@ -143,15 +144,28 @@ class HelpScreen(ModalScreen[str]):
             ("Metadata", "• Experiment configuration\n• Session information\n• Results inspection"),
             ("Config", "• YAML configuration editing\n• Validation and locking\n• Parameter management"),
             ("History", "• Experiment history list\n• Search and filtering\n• Session management"),
+            ("Logs", "• File-based logging\n• Clean TUI display\n• View with external tools"),
         ]
         
         for screen, key_features in features:
             table.add_row(screen, key_features)
-
+            
+        # Add log viewing information
+        yield Static("📋 Log Files", classes="help-section-title")
+        yield Static(
+            "All experiment logs are now saved to:\n"
+            "  • data/logs/experiment.log (main experiment logs)\n"
+            "  • data/logs/tui.log (TUI-specific logs)\n\n"
+            "Use external tools to view logs:\n"
+            "  • tail -f data/logs/experiment.log (live follow)\n"
+            "  • cat data/logs/experiment.log (view all)\n"
+            "  • Code editor with file watching",
+            classes="help-text"
+        )
+            
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle button press events."""
-        if event.button.label == "Close Help":
-            self.dismiss()
+        """Handle close button press."""
+        self.dismiss()
 
     async def action_dismiss(self, result: str | None = None) -> None:
         """Dismiss the help screen."""

@@ -84,6 +84,12 @@ class HistoryScreen(Screen):
         self.status_select: Optional[Select] = None
         self.pagination_label: Optional[Label] = None
         self.detail_panel: Optional[Container] = None
+        self.prev_page_button: Optional[Button] = None
+        self.next_page_button: Optional[Button] = None
+
+        # Sorting
+        self.sort_column: str = "start_time"
+        self.sort_reverse: bool = True  # Newest first
 
     def compose(self) -> ComposeResult:
         """Compose the history screen UI."""
@@ -116,8 +122,16 @@ class HistoryScreen(Screen):
                     classes="control-row",
                 ),
                 
-                # Pagination info
-                Label("", id="pagination-label", classes="pagination-info"),
+                # Pagination info and controls
+                Horizontal(
+                    Label("", id="pagination-label", classes="pagination-info"),
+                    Horizontal(
+                        Button("Previous", id="prev-page-button", variant="default", disabled=True),
+                        Button("Next", id="next-page-button", variant="default", disabled=True),
+                        classes="pagination-controls",
+                    ),
+                    classes="pagination-row",
+                ),
                 
                 classes="header-section",
             ),
@@ -164,6 +178,8 @@ class HistoryScreen(Screen):
         self.status_select = self.query_one("#status-filter", Select)
         self.pagination_label = self.query_one("#pagination-label", Label)
         self.detail_panel = self.query_one("#detail-panel", Container)
+        self.prev_page_button = self.query_one("#prev-page-button", Button)
+        self.next_page_button = self.query_one("#next-page-button", Button)
         
         # Setup table columns
         self._setup_table()
@@ -176,8 +192,11 @@ class HistoryScreen(Screen):
 
     def _setup_table(self) -> None:
         """Setup the experiments table with columns."""
+        if not self.experiments_table:
+            return
+
         table = self.experiments_table
-        
+
         # Add columns
         table.add_column("Session ID", key="session_id", width=20)
         table.add_column("Status", key="status", width=12)
@@ -185,7 +204,7 @@ class HistoryScreen(Screen):
         table.add_column("Config", key="config_name", width=15)
         table.add_column("Images", key="total_images", width=8)
         table.add_column("Phases", key="phases_completed", width=8)
-        
+
         # Make table selectable
         table.cursor_type = "row"
 
@@ -202,14 +221,14 @@ class HistoryScreen(Screen):
         """Apply current filters to experiment list."""
         # Start with all experiments
         self.filtered_experiments = self.all_experiments.copy()
-        
+
         # Apply status filter
         if self.status_filter != "all":
             self.filtered_experiments = [
                 exp for exp in self.filtered_experiments
                 if exp.status == self.status_filter
             ]
-        
+
         # Apply search filter
         if self.search_query:
             search_lower = self.search_query.lower()
@@ -217,10 +236,36 @@ class HistoryScreen(Screen):
                 exp for exp in self.filtered_experiments
                 if search_lower in exp.session_id.lower()
             ]
-        
+
+        # Apply sorting
+        self._sort_experiments()
+
         # Update table
         self._update_table()
         self._update_pagination()
+
+    def _sort_experiments(self) -> None:
+        """Sort experiments by current sort criteria."""
+        if self.sort_column == "start_time":
+            self.filtered_experiments.sort(
+                key=lambda x: x.start_time,
+                reverse=self.sort_reverse
+            )
+        elif self.sort_column == "status":
+            self.filtered_experiments.sort(
+                key=lambda x: x.status,
+                reverse=self.sort_reverse
+            )
+        elif self.sort_column == "session_id":
+            self.filtered_experiments.sort(
+                key=lambda x: x.session_id,
+                reverse=self.sort_reverse
+            )
+        elif self.sort_column == "total_images":
+            self.filtered_experiments.sort(
+                key=lambda x: x.total_images,
+                reverse=self.sort_reverse
+            )
 
     def _update_table(self) -> None:
         """Update the experiments table with current page data."""
@@ -266,21 +311,31 @@ class HistoryScreen(Screen):
         return f"{icon} {status.title()}"
 
     def _update_pagination(self) -> None:
-        """Update pagination label."""
+        """Update pagination label and button states."""
         if not self.pagination_label:
             return
-            
+
         total_experiments = len(self.filtered_experiments)
         total_pages = (total_experiments + self.page_size - 1) // self.page_size
         current_page_num = self.current_page + 1
-        
+
         if total_experiments == 0:
             self.pagination_label.update("No experiments found")
+            if self.prev_page_button:
+                self.prev_page_button.disabled = True
+            if self.next_page_button:
+                self.next_page_button.disabled = True
         else:
             self.pagination_label.update(
                 f"Showing {len(self.filtered_experiments[self.current_page * self.page_size:(self.current_page + 1) * self.page_size])} "
                 f"of {total_experiments} experiments (Page {current_page_num} of {total_pages})"
             )
+
+            # Update button states
+            if self.prev_page_button:
+                self.prev_page_button.disabled = self.current_page == 0
+            if self.next_page_button:
+                self.next_page_button.disabled = self.current_page >= total_pages - 1
 
     def _show_experiment_details(self, experiment: SessionIndexEntry) -> None:
         """Show detailed information for selected experiment."""
@@ -343,20 +398,24 @@ Phase Progress:
     def on_select_changed(self, event: Select.Changed) -> None:
         """Handle status filter changes."""
         if event.select.id == "status-filter":
-            self.status_filter = event.value
+            self.status_filter = str(event.value)
             self.current_page = 0  # Reset to first page
             self._apply_filters()
 
     def on_data_table_selected(self, event: DataTable.RowSelected) -> None:
         """Handle experiment selection in table."""
         if event.data_table.id == "experiments-table":
-            if event.row_key:
-                # Find selected experiment
-                for exp in self.filtered_experiments:
-                    if exp.session_id == event.row_key.get("session_id"):
-                        self.selected_experiment = exp
-                        self._show_experiment_details(exp)
-                        break
+            try:
+                row_index = int(event.row_key)  # Cast to int
+                # Find selected experiment by row index
+                start_idx = self.current_page * self.page_size
+                page_data = self.filtered_experiments[start_idx:start_idx + self.page_size]
+                if 0 <= row_index < len(page_data):
+                    self.selected_experiment = page_data[row_index]
+                    self._show_experiment_details(self.selected_experiment)
+            except (ValueError, TypeError):
+                # Invalid row key
+                pass
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
@@ -375,6 +434,12 @@ Phase Progress:
                 
         elif button_id == "back-button":
             self._hide_experiment_details()
+
+        elif button_id == "prev-page-button":
+            self._previous_page()
+
+        elif button_id == "next-page-button":
+            self._next_page()
 
     def _delete_selected_experiment(self) -> None:
         """Delete the selected experiment with confirmation."""
@@ -413,6 +478,21 @@ Phase Progress:
         """Go back to previous screen."""
         self._hide_experiment_details()
         self.dismiss()
+
+    def _previous_page(self) -> None:
+        """Go to previous page."""
+        if self.current_page > 0:
+            self.current_page -= 1
+            self._update_table()
+            self._update_pagination()
+
+    def _next_page(self) -> None:
+        """Go to next page."""
+        total_pages = (len(self.filtered_experiments) + self.page_size - 1) // self.page_size
+        if self.current_page < total_pages - 1:
+            self.current_page += 1
+            self._update_table()
+            self._update_pagination()
 
     CSS = """
     HistoryScreen {

@@ -1,5 +1,6 @@
 # Bias Detection Framework for Generative AI Image Models
 
+
 A comprehensive research framework for detecting and analyzing implicit biases in text-to-image generative AI models through systematic testing and statistical analysis.
 
 > **🚀 New to this project?** Start with [GETTING_STARTED.md](docs/GETTING_STARTED.md) for a quick 3-step guide!
@@ -39,26 +40,6 @@ This project implements a rigorous, academically-grounded methodology for auditi
 
 ## Project Structure
 
-```
-BiasInGenerativeAi/
-├── config/
-│   └── experiment_config.yaml      # Experiment configuration
-├── data/
-│   ├── raw/
-│   │   └── images/                 # Generated images with metadata
-│   ├── processed/                  # Analysis results
-│   └── results/                    # Statistical summaries and visualizations
-├── src/
-│   └── bias_detector/
-│       ├── generation/             # Image generation (mflux)
-│       ├── analysis/               # VQA analysis
-│       ├── statistics/             # Statistical metrics and visualizations
-│       └── utils/                  # Config and MLflow tracking
-├── notebooks/                      # Jupyter notebooks for exploration
-├── docs/
-│   └── spec.md                     # Full research framework specification
-├── run_experiment.py               # Main experiment runner
-└── pyproject.toml                  # Project dependencies
 ```
 BiasInGenerativeAi/
  config/

@@ -1,16 +1,13 @@
-# Documentation
+Documentation Hub
 
-This directory contains all project documentation.
+This repository's documentation now centers around a single hub that aggregates core docs and provides stable navigation to detailed guides.
 
-## Files
+Core references
+- Getting Started: docs/GETTING_STARTED.md
+- Quick Start: docs/QUICKSTART.md
+- Usage Guide: docs/USAGE.md
+- Project Status: docs/STATUS.md
 
-- **[spec.md](spec.md)** - Research framework specification and methodology
-- **[tech.md](tech.md)** - Technical stack and implementation details
-- **[GETTING_STARTED.md](GETTING_STARTED.md)** - Initial setup guide
-- **[QUICKSTART.md](QUICKSTART.md)** - Quick start guide for running experiments
-- **[USAGE.md](USAGE.md)** - Detailed usage instructions
-- **[STATUS.md](STATUS.md)** - Current project status and progress
-
-## Main Documentation
-
-For an overview of the project, see the [main README](../README.md) in the root directory.
+Hub & main README
+- See hub content in docs/HUB_README.md
+- Root README provides a clean entry point to the docs (see BiasInGenerativeAi/README.md)

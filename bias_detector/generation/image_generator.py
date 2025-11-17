@@ -1,19 +1,10 @@
-"""
-Image generation module using mflux (FLUX models on Apple Silicon).
-
-Implements Phase 3 of the research framework: Image Generation Protocol.
-Implements systematic image generation with version control and metadata tracking.
-"""
-
 import logging
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional
 from datetime import datetime
 import json
-from tqdm import tqdm
-
+from PIL import Image
 import torch
-from diffusers import DiffusionPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +28,7 @@ class ImageGenerator:
         self.config = config
         self.generation_config = config['generation']
 
-        # Get output directory safely
+        # Output directory
         output_config = config.get('output', {})
         if not isinstance(output_config, dict):
             logger.error(f"Output config must be a dictionary, got: {type(output_config)}")
@@ -45,72 +36,61 @@ class ImageGenerator:
         self.output_dir = Path(output_config.get('image_dir', 'data/raw/images'))
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Progress callback for UI updates
         self.progress_callback = progress_callback
 
-        # Device detection
+        # Device
         if torch.cuda.is_available():
             self.device = "cuda"
         elif torch.backends.mps.is_available():
             self.device = "mps"
         else:
             self.device = "cpu"
-
         logger.info(f"Image generation device: {self.device}")
 
-        # Model configuration
-        self.model_id = self.generation_config.get('model', 'runwayml/stable-diffusion-v1-5')
+        self.model_id = self.generation_config.get('model', 'stabilityai/stable-diffusion-2-1')
         self.pipeline = None
         self._initialize_pipeline()
 
     def _initialize_pipeline(self):
-        """Initialize the diffusion pipeline."""
+        """Initialize the diffusion pipeline with lazy import and offline support."""
+        offline = bool(self.config.get('generation', {}).get('offline', False)) or bool(self.config.get('mlflow', {}).get('offline', False))
+        try:
+            # Try dynamic import to avoid static import issues in build env
+            from diffusers import DiffusionPipeline
+            DiffusionPipelineAvailable = True
+        except Exception as e:
+            logger.warning(f"DiffusionPipeline import failed: {e}")
+            DiffusionPipelineAvailable = False
+            DiffusionPipeline = None  # type: ignore
+
+        if not DiffusionPipelineAvailable or offline:
+            logger.info("Offline mode or DiffusionPipeline unavailable; skipping real diffusion load.")
+            self.pipeline = None
+            return
+
         try:
             logger.info(f"Loading diffusion model: {self.model_id}")
-
-            # Load the appropriate pipeline based on model type
-            if 'stable-diffusion' in self.model_id.lower():
-                self.pipeline = DiffusionPipeline.from_pretrained(
-                    self.model_id,
-                    torch_dtype=torch.float16 if self.device != "cpu" else torch.float32,
-                    safety_checker=None,  # Disable safety checker for research
-                    requires_safety_checker=False
-                )
-            elif 'flux' in self.model_id.lower():
-                # For FLUX models, use the standard diffusion pipeline
-                self.pipeline = DiffusionPipeline.from_pretrained(
-                    self.model_id,
-                    torch_dtype=torch.float16 if self.device != "cpu" else torch.float32
-                )
-            else:
-                # Generic diffusion pipeline
-                self.pipeline = DiffusionPipeline.from_pretrained(
-                    self.model_id,
-                    torch_dtype=torch.float16 if self.device != "cpu" else torch.float32
-                )
-
-            # Move to device and enable memory efficiency
+            self.pipeline = DiffusionPipeline.from_pretrained(
+                self.model_id,
+                torch_dtype=torch.float16 if self.device != "cpu" else torch.float32,
+                safety_checker=None,
+                requires_safety_checker=False
+            )
             self.pipeline.to(self.device)
-
             if hasattr(self.pipeline, 'enable_attention_slicing'):
                 self.pipeline.enable_attention_slicing()
-
             if self.device == "cuda" and hasattr(self.pipeline, 'enable_xformers_memory_efficient_attention'):
                 try:
                     self.pipeline.enable_xformers_memory_efficient_attention()
-                except ImportError:
+                except Exception:
                     logger.warning("xformers not available, using standard attention")
-
             logger.info(f"Diffusion pipeline loaded successfully: {self.model_id}")
-
         except Exception as e:
             logger.error(f"Failed to load diffusion model {self.model_id}: {e}")
-            import traceback
-            logger.error(f"Full traceback: {traceback.format_exc()}")
             self.pipeline = None
 
     def _initialize_model(self):
-        """Check if diffusion pipeline is initialized."""
+        """Return whether pipeline is loaded."""
         return self.pipeline is not None
 
     def generate_images_for_prompt(self, prompt: str, prompt_id: str, num_images: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -121,41 +101,48 @@ class ImageGenerator:
             prompt: Text prompt for image generation
             prompt_id: Unique identifier for this prompt
             num_images: Number of images to generate (uses config if None)
-            
+        
         Returns:
             List of dictionaries containing image paths and metadata
         """
+        offline = bool(self.config.get('generation', {}).get('offline', False)) or bool(self.config.get('mlflow', {}).get('offline', False))
         if not self._initialize_model():
-            logger.error("FLUX model not initialized - cannot generate image")
+            if offline:
+                # generate a placeholder image
+                try:
+                    width = int(self.config.get('generation', {}).get('width', 512))
+                    height = int(self.config.get('generation', {}).get('height', 512))
+                    image_path = self.output_dir / f"{prompt_id}_offline.png"
+                    from PIL import Image
+                    img = Image.new('RGB', (width, height), color=(128, 128, 128))
+                    img.save(image_path)
+                    seed = 0
+                    return [{
+                        'image_path': str(image_path),
+                        'seed': seed,
+                        'prompt': prompt,
+                        'prompt_id': prompt_id,
+                        'generation_time': datetime.now().isoformat()
+                    }]
+                except Exception as e:
+                    logger.error(f"Offline placeholder generation failed: {e}")
+                    return []
+            logger.error("Diffusion pipeline not available - cannot generate image")
             return []
-            
+
         if num_images is None:
             num_images = self.generation_config.get('num_images_per_prompt', 10)
-        
         logger.info(f"Generating {num_images} images for prompt: '{prompt}'")
-        results = []
-        
+        results: List[Dict[str, Any]] = []
         seed_strategy = self.generation_config.get('seed_strategy', 'fixed')
         base_seed = self.generation_config.get('base_seed', 42)
-        
-        for i in range(num_images or 10):
-            # Determine seed based on strategy
-            if seed_strategy == 'fixed':
-                seed = base_seed + i
-            else:  # random
-                import random
-                seed = random.randint(0, 2**32 - 1)
-            
-            # Generate image using diffusers
-            if self.pipeline is None:
-                logger.error("Diffusion pipeline not available - skipping image generation")
-                continue
 
-            # Set up generation parameters
+        for i in range(int(num_images)):
+            seed = base_seed + i if seed_strategy == 'fixed' else __import__('random').randint(0, 2**32 - 1)
             generator = torch.Generator(device=self.device).manual_seed(seed)
 
-            with torch.no_grad():
-                result = self.pipeline(
+            try:
+                outputs = self.pipeline(
                     prompt=prompt,
                     num_inference_steps=self.generation_config.get('num_inference_steps', 20),
                     width=self.generation_config.get('width', 512),
@@ -163,149 +150,36 @@ class ImageGenerator:
                     guidance_scale=self.generation_config.get('guidance', 7.5),
                     generator=generator,
                     output_type="pil"
-                ).images[0]
-            
-            # Save the image and get the path
-            output_dir = Path(self.config['data']['output_dirs']['images'])
-            output_dir.mkdir(parents=True, exist_ok=True)
-            image_path = output_dir / f"{prompt_id}_{seed}.png"
-            result.save(image_path)
-            
-            results.append({
-                'image_path': str(image_path),
-                'seed': seed,
-                'prompt': prompt,
-                'prompt_id': prompt_id,
-                'generation_time': datetime.now().isoformat()
-            })
-        
+                )
+                image = outputs.images[0]
+                image_path = self.output_dir / f"{prompt_id}_{seed}.png"
+                image.save(image_path)
+                results.append({
+                    'image_path': str(image_path),
+                    'seed': seed,
+                    'prompt': prompt,
+                    'prompt_id': prompt_id,
+                    'generation_time': datetime.now().isoformat()
+                })
+            except Exception as e:
+                logger.error(f"Image generation failed for {prompt_id}: {e}")
+                continue
         return results
 
     def generate_for_all_prompts(self) -> Dict[str, List[Dict[str, Any]]]:
-        """
-        Generate images for all prompts defined in configuration.
-        
-        Returns:
-            Dictionary mapping prompt IDs to lists of image metadata
-        """
+        """Generate images for all prompts defined in configuration."""
         if not self._initialize_model():
             logger.error("Diffusion pipeline not initialized - cannot generate images")
             return {}
-            
-        all_results = {}
+        all_results: Dict[str, List[Dict[str, Any]]] = {}
         prompts_config = self.config['prompts']
-        
-        # Flatten prompts from all categories
         all_prompts = []
         for category, prompts in prompts_config.items():
             for idx, prompt in enumerate(prompts):
                 prompt_id = f"{category}_{idx:02d}"
                 all_prompts.append((prompt_id, prompt))
-        
         logger.info(f"Generating images for {len(all_prompts)} prompts...")
-
-        try:
-            total_prompts = len(all_prompts)
-            for i, (prompt_id, prompt) in enumerate(tqdm(all_prompts, desc="Processing prompts", unit="prompt")):
-                results = self.generate_images_for_prompt(prompt, prompt_id)
-                all_results[prompt_id] = results
-
-                # Report progress to callback
-                if self.progress_callback:
-                    self.progress_callback.on_progress(
-                        phase_num=3,  # Phase 3: Image Generation
-                        items_done=i + 1,
-                        items_total=total_prompts,
-                        message=f"Generated images for prompt: {prompt[:50]}..."
-                    )
-
-            logger.info(f"Image generation complete. Total images: {sum(len(r) for r in all_results.values())}")
-            return all_results
-        except Exception as e:
-            logger.error(f"Error during image generation: {e}")
-            # Return whatever we have so far instead of None
-            return all_results
-
-    def generate_counterfactual_images(
-        self,
-        base_prompt: str,
-        prompt_id: str,
-        demographic_modifiers: Dict[str, List[str]]
-    ) -> Dict[str, List[Dict[str, Any]]]:
-        """
-        Generate counterfactual images with explicit demographic modifiers.
-        
-        Implements Phase 6: Counterfactual and Sensitivity Analysis.
-        
-        Args:
-            base_prompt: Original ambiguous prompt
-            prompt_id: Identifier for the base prompt
-            demographic_modifiers: Dictionary of demographic categories and their values
-            
-        Returns:
-            Dictionary mapping modified prompts to image metadata
-        """
-        if not self._initialize_model():
-            logger.error("FLUX model not initialized - cannot generate image")
-            return {}
-            
-        logger.info(f"Generating counterfactual images for: '{base_prompt}'")
-        
-        results = {}
-        seed_strategy = self.generation_config.get('seed_strategy', 'fixed')
-        base_seed = self.generation_config.get('base_seed', 42)
-        
-        # Generate images
-        num_images = self.generation_config.get('num_images_per_prompt', 10)  # Fewer for counterfactuals
-        
-        for demographic, values in demographic_modifiers.items():
-            modified_prompt = f"{base_prompt} with {demographic}: {', '.join(values)}"
-            modified_id = f"{prompt_id}_{demographic}"
-            
-            for i in tqdm(range(num_images), desc=f"Generating {demographic} images"):
-                # Determine seed based on strategy
-                if seed_strategy == 'fixed':
-                    seed = base_seed + i
-                else:  # random
-                    import random
-                    seed = random.randint(0, 2**32 - 1)
-                
-                # Generate image using diffusers
-                if self.pipeline is None:
-                    logger.error("Diffusion pipeline not available - skipping counterfactual image generation")
-                    continue
-
-                # Set up generation parameters
-                generator = torch.Generator(device=self.device).manual_seed(seed)
-
-                with torch.no_grad():
-                    result = self.pipeline(
-                        prompt=modified_prompt,
-                        num_inference_steps=self.generation_config.get('num_inference_steps', 20),
-                        width=self.generation_config.get('width', 512),
-                        height=self.generation_config.get('height', 512),
-                        guidance_scale=self.generation_config.get('guidance', 7.5),
-                        generator=generator,
-                        output_type="pil"
-                    ).images[0]
-                
-                # Save the image and get the path
-                output_dir = Path(self.config['data']['output_dirs']['images'])
-                output_dir.mkdir(parents=True, exist_ok=True)
-                image_path = output_dir / f"{modified_id}_{seed}.png"
-                result.save(image_path)
-                
-                if modified_id not in results:
-                    results[modified_id] = []
-                
-                results[modified_id].append({
-                    'image_path': str(image_path),
-                    'seed': seed,
-                    'prompt': modified_prompt,
-                    'prompt_id': modified_id,
-                    'demographic': demographic,
-                    'base_prompt': base_prompt,
-                    'generation_time': datetime.now().isoformat()
-                })
-        
-        return results
+        for prompt_id, prompt in all_prompts:
+            results = self.generate_images_for_prompt(prompt, prompt_id)
+            all_results[prompt_id] = results
+        return all_results

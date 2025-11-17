@@ -1,296 +1,57 @@
-# Usage Guide
+# Usage (Diffusers Edition)
 
-## ✅ Setup Verification
+This guide describes how to use the Bias Detection Framework with HuggingFace diffusers, enabling testing across multiple diffusion models.
 
-First, verify your setup is working:
+## Model Switching (Diffusers)
+Easily switch the diffusion model by editing the experiment config.
 
-```bash
-uv run python test_setup.py
+### Quick Switch
+1) Edit config/experiment_config.yaml:
+
+```yaml
+generation:
+  model: "stabilityai/stable-diffusion-2-1"  # choose from SD2.1, SD1-5, SDXL, etc.
 ```
-
-You should see all imports pass and configuration summary.
-
-## 🚀 Running Experiments
-
-### Option 1: Quick Test (Recommended First)
-
-Test with a single prompt to verify everything works:
-
+2) Run the generation phase:
 ```bash
-# This will generate 5 images for one prompt and analyze them
-uv run python example_usage.py --example 1
-```
-
-Expected time: ~2-5 minutes (depending on model download)
-
-### Option 2: Full Experiment
-
-Run the complete bias detection pipeline:
-
-```bash
-# Full experiment with all prompts
-uv run python run_experiment.py
-```
-
-With default config (10 images × 17 prompts = 170 images):
-- Generation: ~10-20 minutes
-- VQA Analysis: ~5-10 minutes
-- Statistics: <1 minute
-- **Total: ~20-30 minutes**
-
-### Option 3: Phase-by-Phase
-
-Run individual phases separately:
-
-```bash
-# Just setup
-uv run python run_experiment.py --phase setup
-
-# Just generate images
 uv run python run_experiment.py --phase generate
-
-# Just analyze existing images
-uv run python run_experiment.py --phase analyze
-
-# Just calculate statistics
-uv run python run_experiment.py --phase statistics
 ```
 
-## 📊 Viewing Results
+### Model Performance Comparison
+| Model | Quality | Speed | Memory | Best For |
+|-------|---------|-------|--------|----------|
+| SD v1.5 | Good | Fast | Low | Quick tests |
+| SD 2.1 | Balanced | Medium | Medium | General use |
+| SDXL | Best quality | Slow | High | High-fidelity output |
+| Flux (via diffusers) | Cutting edge | Medium-High | High | Experimental research |
 
-### Generated Images
+### Tips for Diffusers Models
+- Use SD2.1 for quick iterations; SDXL for best quality when you have memory headroom.
+- Use smaller image sizes (e.g., 512x512) to speed up tests.
+- Enable or disable memory optimizations (attention slicing, xformers) depending on your hardware.
 
-```bash
-ls data/raw/images/
-```
-
-Each image has:
-- `*.png` - The generated image
-- `*.json` - Metadata (prompt, seed, parameters)
-
-### Analysis Results
-
-```bash
-# View analysis JSON
-cat data/processed/analysis_results.json | jq . | head -50
-
-# View statistical summary
-cat data/results/statistical_summary.json | jq .
-```
-
-### Visualizations
-
-```bash
-# View summary figure
-open data/results/visualizations/summary_figure.png
-
-# View all visualizations
-open data/results/visualizations/
-```
-
-### MLflow UI
-
-```bash
-mlflow ui
-# Then open http://localhost:5000
-```
-
-## ⚙️ Configuration
-
-Edit `config/experiment_config.yaml`:
-
-### Quick Test Configuration
-
-For fast testing:
-
-```yaml
-generation:
-  model: "schnell"  # Fastest model
-  num_images_per_prompt: 5  # Just a few images
-  steps: 4
-```
-
-### Production Configuration
-
-For research:
-
-```yaml
-generation:
-  model: "dev"  # Better quality
-  num_images_per_prompt: 50  # Statistical significance
-  steps: 4
-```
-
-### Model Options
-
-- `schnell` - Fastest (4 steps), good quality
-- `dev` - Slower, higher quality
-- `krea_dev` - Alternative variant
-
-## 🔍 Interpreting Results
-
-### Example Output
-
-```json
-{
-  "gender": {
-    "chi_square_test": {
-      "chi_square_statistic": 156.4,
-      "p_value": 0.0001,
-      "cramers_v": 0.456,
-      "effect_size": "large",
-      "significant": true
-    }
-  }
-}
-```
-
-### What This Means
-
-- **p-value < 0.05**: Significant bias detected ✓
-- **Cramer's V = 0.456**: Large effect size (substantial bias)
-- **Significant: true**: Distribution significantly different from uniform
-
-### Effect Size Interpretation
-
-| Cramer's V | Effect Size | Interpretation |
-|------------|-------------|----------------|
-| < 0.1      | Negligible  | Minimal bias   |
-| 0.1 - 0.3  | Small       | Noticeable bias |
-| 0.3 - 0.5  | Medium      | Substantial bias |
-| > 0.5      | Large       | Very strong bias |
-
-## 🛠️ Troubleshooting
-
-### Models Taking Long to Download
-
-First run will download models (~2-5 GB):
-- FLUX.1-schnell: ~2 GB
-- BLIP-2: ~5 GB
-
-These are cached locally, subsequent runs are faster.
-
-### Out of Memory
-
-Reduce image count:
-
+## Quick Test (5-10 minutes)
+1) Set a small number of images per prompt:
 ```yaml
 generation:
   num_images_per_prompt: 5
 ```
-
-Or reduce resolution:
-
-```yaml
-generation:
-  width: 512
-  height: 512
-```
-
-### Import Errors
-
-Always use `uv run`:
-
+2) Run a quick example:
 ```bash
-# ✓ Correct
-uv run python run_experiment.py
-
-# ✗ Wrong (won't find dependencies)
-python run_experiment.py
+uv run python example_usage.py --example 1
 ```
 
-### Permission Errors on macOS
+## Phase-by-Phase Testing
+- Setup: `uv run python run_experiment.py --phase setup`
+- Generate: `uv run python run_experiment.py --phase generate`
+- Analyze: `uv run python run_experiment.py --phase analyze`
+- Statistics: `uv run python run_experiment.py --phase statistics`
 
-If you get permissions errors with mflux:
+## Viewing Results
+- MLflow UI: `mlflow ui` (default port 5000) or your configured port
+- Access artifacts and plots in the `data/` directory and MLflow UI
 
-```bash
-# Ensure you're on Apple Silicon
-uname -m  # Should show "arm64"
-```
-
-## 📝 Custom Experiments
-
-### Add Your Own Prompts
-
-Edit `config/experiment_config.yaml`:
-
-```yaml
-prompts:
-  my_category:
-    - "Your custom prompt here"
-    - "Another custom prompt"
-```
-
-### Change VQA Model
-
-Use a larger model for better accuracy:
-
-```yaml
-vqa_analysis:
-  model: "Salesforce/blip2-flan-t5-xl"  # Larger, more accurate
-```
-
-### Add New Bias Categories
-
-```yaml
-bias_categories:
-  - custom_attribute
-
-vqa_analysis:
-  questions:
-    custom_attribute:
-      question: "What is the perceived X of the person?"
-      options: ["option1", "option2", "unclear"]
-```
-
-## 🔬 Research Workflow
-
-1. **Pilot Test** (5 images/prompt)
-   ```bash
-   # Edit config: num_images_per_prompt: 5
-   uv run python run_experiment.py
-   ```
-
-2. **Review Results**
-   ```bash
-   open data/results/visualizations/summary_figure.png
-   ```
-
-3. **Full Experiment** (50-100 images/prompt)
-   ```bash
-   # Edit config: num_images_per_prompt: 50
-   uv run python run_experiment.py
-   ```
-
-4. **Human Validation**
-   - Sample images from `data/raw/images/`
-   - Have raters classify demographics
-   - Compare to VQA results
-
-5. **Report Findings**
-   - Use visualizations from `data/results/visualizations/`
-   - Include statistical summary
-   - Cite methodology from `docs/spec.md`
-
-## 📚 More Examples
-
-```bash
-# Run different examples
-uv run python example_usage.py --example 1  # Quick test
-uv run python example_usage.py --example 3  # Custom prompts
-uv run python example_usage.py --example 5  # Visualizations only
-```
-
-## 🆘 Getting Help
-
-1. Check `test_setup.py` passes
-2. Review `README.md` for detailed docs
-3. Examine `docs/spec.md` for methodology
-4. Look at `example_usage.py` for code examples
-
-## 💡 Tips
-
-- Start with `schnell` model and 5-10 images for quick tests
-- Use MLflow UI to compare different experiment runs
-- Save compute: generate images once, run analysis multiple times
-- For production: use `dev` model with 50+ images per prompt
+## Next Steps
+- Add more models to the config for side-by-side comparisons
+- Use multiple config files to compare performance across models
+- Use MLflow to track results and artifacts for reproducibility

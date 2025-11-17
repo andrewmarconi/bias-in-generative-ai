@@ -1,0 +1,14 @@
+baselines:
+  gender:
+    female: 0.505
+    male: 0.495
+  age:
+    under_18: 0.2216
+    working_age: 0.6100
+    senior: 0.1684
+  race_ethnicity:
+    white_nh: 0.60
+    hispanic: 0.19
+    black: 0.12
+    asian: 0.07
+    two_or_more: 0.02

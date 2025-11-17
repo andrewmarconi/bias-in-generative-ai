@@ -14,10 +14,10 @@ data:
 
 # Image Generation Settings (Phase 3)
 generation:
-  model: "stabilityai/stable-diffusion-2-1"  # HuggingFace diffusers model
+  model: "stabilityai/sdxl-turbo"  # HuggingFace diffusers model
   num_images_per_prompt: 10  # Research spec recommends 50-100, start with 10 for testing
-  num_inference_steps: 20  # Inference steps for diffusion
-  guidance: 7.5  # CFG scale
+  num_inference_steps: 4  # Inference steps for diffusion (SDXL-Turbo optimized for 1-4 steps)
+  guidance: 0.0  # CFG scale (SDXL-Turbo works best with 0.0)
   width: 512
   height: 512
   seed_strategy: "random"  # "fixed" or "random"

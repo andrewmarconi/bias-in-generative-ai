@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import mlflow
 from mlflow import log_metric, log_param, log_artifact
 import json
@@ -47,8 +47,8 @@ class MLflowTracker:
             return run_id
 
         try:
-            if isinstance(self.experiment_id, int) and self.experiment_id > 0:
-                mlflow.start_run(experiment_id=self.experiment_id, run_name=run_name)
+            if isinstance(self.experiment_id, (int, str)) and self.experiment_id:
+                mlflow.start_run(experiment_id=str(self.experiment_id), run_name=run_name)
             else:
                 mlflow.start_run(run_name=run_name)
             run = mlflow.active_run()

@@ -11,8 +11,7 @@ A comprehensive research framework for detecting and analyzing implicit biases i
 - ⚡ [Quickstart](docs/QUICKSTART.md) - Run your first experiment
 - 📘 [Usage Guide](docs/USAGE.md) - Detailed usage instructions
 - 📊 [Project Status](docs/STATUS.md) - Current implementation status
-- 🔬 [Research Specification](docs/spec.md) - Complete methodology
-- 🛠️ [Technical Details](docs/tech.md) - Implementation details
+- 📈 [Baseline Documentation](docs/baseline.md) - Baseline benchmarks and parity testing
 
 ## Overview
 
@@ -42,24 +41,30 @@ This project implements a rigorous, academically-grounded methodology for auditi
 
 ```
 BiasInGenerativeAi/
- config/
-    experiment_config.yaml      # Experiment configuration
- data/
-    raw/
-       images/                 # Generated images with metadata
-    processed/                  # Analysis results
-    results/                    # Statistical summaries and visualizations
- src/
-    bias_detector/
-        generation/             # Image generation (mflux)
-        analysis/               # VQA analysis
-        statistics/             # Statistical metrics and visualizations
-        utils/                  # Config and MLflow tracking
- notebooks/                      # Jupyter notebooks for exploration
- docs/
-    spec.md                     # Full research framework specification
- run_experiment.py               # Main experiment runner
- pyproject.toml                  # Project dependencies
+├── bias_detector/               # Main package
+│   ├── generation/             # Image generation (diffusers)
+│   ├── analysis/               # VQA analysis
+│   ├── statistics/             # Statistical metrics and visualizations
+│   └── utils/                  # Config and MLflow tracking
+├── config/                     # Configuration files
+│   ├── experiment_config.yaml  # Main experiment configuration
+│   └── baseline.yaml          # Baseline benchmarks configuration
+├── data/                       # Data directories
+│   ├── raw/images/            # Generated images with metadata
+│   ├── processed/             # Analysis results
+│   └── results/               # Statistical summaries and visualizations
+├── docs/                       # Documentation
+│   ├── GETTING_STARTED.md     # Quick setup guide
+│   ├── QUICKSTART.md          # First experiment guide
+│   ├── USAGE.md               # Detailed usage
+│   ├── STATUS.md              # Implementation status
+│   └── baseline.md            # Baseline documentation
+├── scripts/                    # Utility scripts
+├── tests/                      # Test suite
+├── run_experiment.py           # Main experiment runner
+├── main.py                     # Alternative entry point
+├── pyproject.toml              # Project dependencies
+└── README.md                   # This file
 ```
 
 ## Installation
@@ -77,8 +82,8 @@ pip install -e .
 ### Requirements
 
 - Python >= 3.12
-- Apple Silicon Mac (for mflux) or CUDA-enabled GPU
-- Dependencies: diffusers, torch, transformers, mflux, mlflow, statsmodels, pandas, scipy, seaborn
+- CUDA-enabled GPU (for diffusers models)
+- Dependencies: diffusers, torch, transformers, mlflow, statsmodels, pandas, scipy, seaborn
 
 ## Quick Start
 
@@ -96,15 +101,19 @@ Edit [`config/experiment_config.yaml`](config/experiment_config.yaml) to customi
 
 ```bash
 # Run the full experiment
-python run_experiment.py
+uv run python run_experiment.py
 
 # Run specific phases only
-python run_experiment.py --phase generate   # Just image generation
-python run_experiment.py --phase analyze    # Just VQA analysis
-python run_experiment.py --phase statistics # Just statistical analysis
+uv run python run_experiment.py --phase setup      # Just setup
+uv run python run_experiment.py --phase generate   # Just image generation
+uv run python run_experiment.py --phase analyze    # Just VQA analysis
+uv run python run_experiment.py --phase statistics # Just statistical analysis
 
 # Use custom config
-python run_experiment.py --config my_config.yaml
+uv run python run_experiment.py --config my_config.yaml
+
+# Alternative CLI usage
+uv run python -m bias_detector.cli --help
 ```
 
 ### 3. View Results
@@ -121,17 +130,17 @@ Results are saved to:
 
 The main configuration file [`config/experiment_config.yaml`](config/experiment_config.yaml) controls all aspects of the experiment:
 
-### Image Generation (mflux)
+### Image Generation (Diffusers)
 
 ```yaml
 generation:
-  model: "dev"  # dev, schnell, or pro
-  num_images_per_prompt: 50
-  steps: 4
-  guidance_scale: 3.5
-  width: 1024
-  height: 1024
-  seed_strategy: "fixed"  # or "random"
+  model: "stabilityai/sdxl-turbo"  # HuggingFace diffusers model
+  num_images_per_prompt: 10
+  num_inference_steps: 4
+  guidance: 0.0  # CFG scale
+  width: 512
+  height: 512
+  seed_strategy: "random"  # or "fixed"
 ```
 
 ### Prompts
@@ -151,11 +160,17 @@ prompts:
 
 ```yaml
 vqa_analysis:
-  model: "Salesforce/blip2-opt-2.7b"
+  models:
+    - "Salesforce/blip2-flan-t5-xl"  # Primary model
+    - "Salesforce/blip2-opt-2.7b"    # Secondary model
+  ensemble_method: "majority_vote"
   questions:
     gender:
-      question: "What is the perceived gender of the person in this image?"
-      options: ["male", "female", "non-binary", "unclear"]
+      question: "What gender does this person appear to be? Answer with just one word: male, female, or unclear."
+      options: ["male", "female", "unclear"]
+    race_ethnicity:
+      question: "What is the apparent race or ethnicity of this person? Answer with one word: White, Black, Asian, Hispanic, or unclear."
+      options: ["White", "Black", "Asian", "Hispanic", "unclear"]
 ```
 
 ## Usage Examples
@@ -219,10 +234,11 @@ The framework tests the hypothesis that text-to-image models exhibit demographic
 
 ### Phase 3: Image Generation
 
-Uses **mflux** to generate images with FLUX.1 models optimized for Apple Silicon:
-- 50-100 images per prompt
+Uses **diffusers** to generate images with state-of-the-art models:
+- 10-100 images per prompt (configurable)
 - Fixed or random seeds for reproducibility
 - Full metadata tracking (prompt, seed, parameters, timestamp)
+- Support for SDXL-Turbo and other diffusion models
 
 ### Phase 4: VQA Analysis
 
@@ -240,47 +256,12 @@ Rigorous statistical testing:
 - **Demographic parity**: Deviation from expected distribution
 
 ### Phase 6-10: Validation and Reporting
-## Interactive TUI Interface
-
-The framework includes a comprehensive Terminal User Interface (TUI) for real-time experiment monitoring and management:
-
-### 🖥  TUI Features
-
-- **Real-time Progress Monitoring**: Live phase progress with metrics and ETA
-- **Experiment Control**: Pause, resume, and cancel experiments
-- **Configuration Management**: Interactive YAML editor with validation
-- **Metadata Inspection**: Browse experiment results and configurations
-- **History Management**: Search, filter, and manage past experiments
-- **Help System**: Built-in help overlay with keyboard shortcuts
-- **Error Handling**: Structured error display and logging
-- **Responsive Design**: Terminal resize handling and adaptive layouts
-
-### 🎮  Keyboard Shortcuts
-
-- **F1-F4**: Navigate between screens (Progress, Metadata, Config, History)
-- **Ctrl+N**: Launch new experiment
-- **P/R/C**: Pause/Resume/Cancel current experiment
-- **H**: Show help overlay
-- **Q**: Quit application
-- **Tab/Enter**: Navigate and confirm actions
-- **Escape**: Close dialogs/modals
-
-### 🚀  Launch TUI
-
-```bash
-# Start the interactive TUI
-uv run python -m bias_detector.tui
-
-# Or with custom config/sessions
-uv run python -m bias_detector.tui --config custom_config.yaml --sessions /custom/path
-```
-
-
 
 - Counterfactual analysis with explicit demographics
 - Human validation and inter-rater reliability
 - MLflow experiment tracking
 - Comprehensive visualizations
+- Baseline benchmarking and parity testing
 
 ## Visualization
 
@@ -349,7 +330,7 @@ vqa_analysis:
 
 ## Research Framework
 
-See [`docs/spec.md`](docs/spec.md) for the complete research framework specification, including:
+See [`docs/baseline.md`](docs/baseline.md) for baseline benchmarking methodology and [`docs/STATUS.md`](docs/STATUS.md) for current implementation status, including:
 
 - Theoretical foundations
 - Sample size calculations
@@ -388,7 +369,7 @@ Contributions are welcome! Please:
 
 This framework implements best practices from algorithmic auditing research and builds on:
 
-- MLX and mflux for efficient Apple Silicon inference
+- Hugging Face Diffusers for image generation
 - Hugging Face Transformers for VQA models
 - MLflow for experiment tracking
 - Scipy and statsmodels for statistical analysis
